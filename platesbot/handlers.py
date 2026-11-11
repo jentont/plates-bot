@@ -52,10 +52,22 @@ def roll_caption(game: Game, roll: dict) -> str:
             f"<i>{esc(reasons)}</i>")
 
 
+def sell_button(config: Config, roll: dict) -> dict | None:
+    price = config.sell_price(roll)
+    return btn(f"💰 Продать за {price} ⚡", f"sell:{roll['id']}") if price else None
+
+
 def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
     rows = []
-    if not roll["saved"]:
-        rows.append([btn("⭐ Сохранить в гараж", f"save:{roll['id']}", style="primary")])
+    if roll.get("sold"):
+        pass
+    elif not roll["saved"]:
+        sb = sell_button(config, roll)
+        rows.append([btn("⭐ Сохранить в гараж", f"save:{roll['id']}", style="primary")] + ([sb] if sb else []))
+    else:
+        sb = sell_button(config, roll)
+        if sb:
+            rows.append([sb])
     rows.append([btn("⚡ Крутить ещё", "roll"), btn("📤 Поделиться", switch_inline_query=f"{roll['id']}")])
     ab = app_button(config, tg)
     if ab:
@@ -63,12 +75,12 @@ def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
     return kb(rows)
 
 
-async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, roll: dict, chat_id: int | None = None) -> None:
+async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, roll: dict, chat_id: int | None = None) -> dict:
     plate, ev = game.roll_objects(roll)
     png = render_card(plate, ev, "Номер выпал", user.get("first_name") or "Игрок", tg.me.get("username", "bot"),
                       game.country_name(plate.country))
-    await tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat_id or user["id"],
-             caption=roll_caption(game, roll), parse_mode="HTML", reply_markup=roll_keyboard(config, tg, roll))
+    return await tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat_id or user["id"],
+                    caption=roll_caption(game, roll), parse_mode="HTML", reply_markup=roll_keyboard(config, tg, roll))
 
 
 class Handlers:
@@ -78,6 +90,8 @@ class Handlers:
         self._inline_busy: set[str] = set()   # инлайн-сообщения, где бросок уже идёт (двойное нажатие)
         self._inline_done: set[str] = set()   # уже брошенные: запоздалое второе нажатие не перебрасывает номер
         self.storage = game.storage
+        from .cards import CardStore
+        self.cards = CardStore(tg, self.storage, game, config)
         from .groups import Groups
         self.groups = Groups(self)
 
@@ -165,6 +179,7 @@ class Handlers:
                 "редкость, очки, цена на рынке. Лучшие сохраняй в гараж.\n\n"
                 f"⚡ Энергия: {self.config.energy_max} бросков, +1 каждые {regen_text(self.config.energy_regen_sec)}. "
                 "Докупить: /energy\n"
+                "💰 Редкие номера можно продать за прокруты.\n"
                 "🌟 Напиши свой номер, например <code>А777АА 777</code>, — оценю.")
 
     async def _send_media(self, kind: str, file_id: str, chat_id: int, caption: str, markup: dict) -> bool:
@@ -247,15 +262,60 @@ class Handlers:
     async def cmd_garage(self, user: dict) -> None:
         garage = self.storage.garage(user["id"])
         stats = self.storage.stats(user["id"])
+        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", text=self.garage_text(garage, stats),
+                      reply_markup=self.garage_keyboard(garage))
+
+    def garage_text(self, garage: list[dict], stats: dict) -> str:
         if not garage:
-            text = "⭐ Гараж пуст. Брось номер и сохрани его."
+            return "⭐ Гараж пуст. Брось номер и сохрани его."
+        lines = []
+        for r in garage:
+            plate, ev = self.game.roll_objects(r)
+            lines.append(f"<b>{esc(plate.text)}</b> · {esc(ev.tier_name)} · {esc(format_price(ev, plate.country))}"
+                         + (" · навсегда" if r["forever"] else ""))
+        return (f"⭐ <b>Гараж</b> {len(garage)}/{stats['slots']}\n\n" + "\n".join(lines)
+                + "\n\n🗑 — убрать номер и освободить место, 💰 — продать за прокруты")
+
+    def garage_keyboard(self, garage: list[dict], confirm: int | None = None) -> dict | None:
+        """По строке на номер: удалить и, если бот его выкупает, продать. confirm — номер, который ждёт «Да»."""
+        rows = []
+        for r in garage[:12]:
+            if r["id"] == confirm:
+                rows.append([btn(f"🗑 Удалить {r['plate']['text']}?", "noop"),
+                             btn("✅ Да", f"del!:{r['id']}", style="danger"), btn("❌ Нет", "del0")])
+                continue
+            row = [btn(f"🗑 {r['plate']['text']}", f"del:{r['id']}")]
+            price = self.config.sell_price(r)
+            if price:
+                row.append(btn(f"💰 Продать · {price} ⚡", f"sell:{r['id']}:g"))
+            rows.append(row)
+        return kb(rows) if rows else None
+
+    async def on_garage_delete(self, cq: dict, data: str) -> None:
+        user, msg = cq["from"], cq.get("message") or {}
+        action, _, raw = data.partition(":")
+        if action == "del!":
+            roll = self.storage.drop_from_garage(int(raw), user["id"]) if raw.isdigit() else None
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"],
+                          text=f"Удалил {roll['plate']['text']} из гаража" if roll else "Номера уже нет в гараже")
+            confirm = None
         else:
-            lines = []
-            for r in garage:
-                plate, ev = self.game.roll_objects(r)
-                lines.append(f"<b>{esc(plate.text)}</b> · {esc(ev.tier_name)} · {esc(format_price(ev, plate.country))}" + (" · навсегда" if r["forever"] else ""))
-            text = f"⭐ <b>Гараж</b> {len(garage)}/{stats['slots']}\n\n" + "\n".join(lines)
-        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", text=text)
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            confirm = int(raw) if action == "del" and raw.isdigit() else None
+        if not msg:
+            return
+        garage = self.storage.garage(user["id"])
+        stats = self.storage.stats(user["id"])
+        try:
+            if action == "del!":     # список номеров в тексте тоже поменялся
+                await self.tg("editMessageText", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                              parse_mode="HTML", text=self.garage_text(garage, stats),
+                              reply_markup=self.garage_keyboard(garage))
+            else:
+                await self.tg("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                              reply_markup=self.garage_keyboard(garage, confirm))
+        except TelegramError:
+            pass
 
     async def cmd_top(self, user: dict) -> None:
         top = self.storage.top(10)
@@ -298,7 +358,8 @@ class Handlers:
                 params["reply_markup"] = markup
             await self.tg("sendMessage", chat_id=user["id"], text=text, parse_mode="HTML", **params)
             return
-        await send_roll_card(self.tg, self.game, self.config, user, roll)
+        sent = await send_roll_card(self.tg, self.game, self.config, user, roll)
+        self.remember_card(roll, sent)
 
     # ------------------------------------------------------------ callbacks
 
@@ -353,6 +414,15 @@ class Handlers:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             await self.send_energy_invoice(user, pack)
             return
+        if data.startswith("sell:"):
+            await self.on_sell(cq, data)
+            return
+        if data.startswith(("del:", "del!:")) or data == "del0":
+            await self.on_garage_delete(cq, data)
+            return
+        if data == "noop":
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            return
         if data.startswith("save:"):
             msg = cq.get("message") or {}
             in_group = (msg.get("chat") or {}).get("type") in ("group", "supergroup")
@@ -360,6 +430,9 @@ class Handlers:
             if status == "missing" and in_group:
                 await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
                               text="Это чужой номер. Напиши .ролл, чтобы выбить свой")
+                return
+            if status == "sold":
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Этот номер уже продан")
                 return
             if status == "ok":
                 await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Сохранено в гараж")
@@ -383,6 +456,61 @@ class Handlers:
                 await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Номер не найден")
             return
         await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+
+    def remember_card(self, roll: dict, sent) -> None:
+        try:
+            self.cards.remember(roll["id"], sent["photo"][-1]["file_id"])
+        except (KeyError, IndexError, TypeError):
+            pass
+
+    async def on_sell(self, cq: dict, data: str) -> None:
+        """Продажа номера боту за прокруты: из карточки (личка и группа) и из гаража."""
+        user, msg = cq["from"], cq.get("message") or {}
+        parts = data.split(":")
+        try:
+            roll_id = int(parts[1])
+        except (IndexError, ValueError):
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            return
+        in_group = (msg.get("chat") or {}).get("type") in ("group", "supergroup")
+        status, roll, gain = self.storage.sell_roll(roll_id, user["id"], self.config.sell_price)
+        texts = {
+            "missing": "Это чужой номер. Напиши .ролл, чтобы выбить свой" if in_group else "Номер не найден",
+            "sold": "Этот номер уже продан",
+            "expired": "Номер сгорел: несохранённые номера живут 24 часа",
+            "cheap": "Обычные номера бот не выкупает",
+        }
+        if status != "ok":
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text=texts[status], show_alert=status == "missing")
+            return
+        en = self.storage.energy(user["id"])
+        await self.tg("answerCallbackQuery", callback_query_id=cq["id"],
+                      text=f"Продано за {gain} прокрутов. Энергия: {en['current']}")
+        if not msg:
+            return
+        chat_id, mid = msg["chat"]["id"], msg["message_id"]
+        try:
+            if len(parts) > 2 and parts[2] == "g":          # из гаража: обновить список
+                garage = self.storage.garage(user["id"])
+                await self.tg("editMessageText", chat_id=chat_id, message_id=mid, parse_mode="HTML",
+                              text=self.garage_text(garage, self.storage.stats(user["id"])),
+                              reply_markup=self.garage_keyboard(garage))
+            elif in_group:
+                await self.tg("editMessageReplyMarkup", chat_id=chat_id, message_id=mid,
+                              reply_markup=self.groups.card_keyboard(roll))
+            else:
+                await self.tg("editMessageReplyMarkup", chat_id=chat_id, message_id=mid,
+                              reply_markup=roll_keyboard(self.config, self.tg, roll))
+        except TelegramError:
+            pass
+        if in_group and gain >= 10:                       # громкие продажи видно всему чату
+            from .groups import mention
+            try:
+                await self.tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
+                              reply_parameters={"message_id": mid, "allow_sending_without_reply": True},
+                              text=f"💰 {mention(user)} продал <b>{esc(roll['plate']['text'])}</b> за {gain} прокрутов ⚡")
+            except TelegramError:
+                pass
 
     async def on_payment(self, user: dict, payment: dict) -> None:
         payload = payment.get("invoice_payload", "")
@@ -413,7 +541,13 @@ class Handlers:
                                   ("world", "Бросить номер мира", "Любая из 19 стран")):
             markup = kb([[btn("Крутить", f"ir:{kind}:{user['id']}", style="primary")]])
             caption = f"⚡ <b>{name}</b> бросает номер. Нажми «Крутить»"
-            if self.config.public_url:
+            cover = await self.cards.cover_id(kind)
+            if cover:
+                results.append({
+                    "type": "photo", "id": f"roll_{kind}", "photo_file_id": cover,
+                    "title": title, "description": desc, "caption": caption, "parse_mode": "HTML", "reply_markup": markup,
+                })
+            elif self.config.public_url:
                 results.append({
                     "type": "photo", "id": f"roll_{kind}",
                     "photo_url": f"{self.config.public_url}/card/cover_{kind}.png?v=2",
@@ -430,7 +564,15 @@ class Handlers:
         if query.isdigit():
             roll = self.storage.get_roll(int(query))
             if roll and roll["user_id"] == user["id"]:
-                if self.config.public_url:
+                card = await self.cards.card_id(roll, user.get("first_name") or "Игрок")
+                if card:
+                    results.insert(0, {
+                        "type": "photo", "id": f"share_{roll['id']}", "photo_file_id": card,
+                        "title": f"Мой номер {roll['plate']['text']}",
+                        "caption": roll_caption(self.game, roll), "parse_mode": "HTML",
+                        "reply_markup": kb([[btn("⚡ Крутить свой", url=app_link(self.config, self.tg))]]),
+                    })
+                elif self.config.public_url:
                     results.insert(0, {
                         "type": "photo", "id": f"share_{roll['id']}",
                         "photo_url": f"{self.config.public_url}/card/{roll['id']}.png",
@@ -491,11 +633,16 @@ class Handlers:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             markup = kb([[btn("⚡ Крутить свой", switch_inline_query_current_chat="", style="primary")],
                          [btn("✨ Открыть бота", url=app_link(self.config, self.tg))]])
-            if self.config.public_url:
+            card = await self.cards.card_id(roll, user.get("first_name") or "Игрок")
+            media = card or (f"{self.config.public_url}/card/{roll['id']}.png" if self.config.public_url else None)
+            try:
+                if not media:
+                    raise TelegramError("editMessageMedia", 0, "нет ни склада, ни PUBLIC_URL")
                 await self.tg("editMessageMedia", inline_message_id=imid, reply_markup=markup,
-                              media={"type": "photo", "media": f"{self.config.public_url}/card/{roll['id']}.png",
+                              media={"type": "photo", "media": media,
                                      "caption": roll_caption(self.game, roll), "parse_mode": "HTML"})
-            else:
+            except TelegramError as e:     # заготовка была текстом или картинка не скачалась — хотя бы текст
+                log.info("инлайн-карточка картинкой не встала: %s", e)
                 await self.tg("editMessageText", inline_message_id=imid, parse_mode="HTML",
                               text=roll_caption(self.game, roll), reply_markup=markup)
         finally:

@@ -100,6 +100,7 @@ async def run() -> None:
             # Премиум-эмодзи: паки из админки, иначе ICON_PACKS (по умолчанию tgiosicons)
             await emoji.load(tg, admin.packs())
             handlers = Handlers(tg, game, config, sponsors=sponsors, admin=admin)
+            admin.cards = handlers.cards
             tasks.append(asyncio.create_task(sponsors.report_loop()))
 
             async def polling():

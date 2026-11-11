@@ -53,8 +53,14 @@ class Groups:
 
     def card_keyboard(self, roll: dict) -> dict:
         rows = []
-        if not roll["saved"]:
-            rows.append([btn("⭐ В гараж", f"save:{roll['id']}", style="primary")])
+        price = self.config.sell_price(roll)
+        row = []
+        if not roll["saved"] and not roll.get("sold"):
+            row.append(btn("⭐ В гараж", f"save:{roll['id']}", style="primary"))
+        if price:
+            row.append(btn(f"💰 Продать за {price} ⚡", f"sell:{roll['id']}"))
+        if row:
+            rows.append(row)
         rows.append([btn("⚡ Крутить свой", "groll", style="primary")])
         rows.append([btn("✨ Открыть бота", url=self.bot_link("g"))])
         return kb(rows)
@@ -123,8 +129,9 @@ class Groups:
         caption = (f"⚡ {mention(user)} выбил номер <b>{esc(plate.text)}</b>\n"
                    f"🌟 {esc(where)}\n"
                    f"👑 {esc(ev.tier_name)} · 💰 <b>{esc(format_price(ev, plate.country))}</b>")
-        await self.tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat["id"], caption=caption,
-                      parse_mode="HTML", reply_parameters=reply, reply_markup=self.card_keyboard(roll))
+        sent = await self.tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat["id"], caption=caption,
+                             parse_mode="HTML", reply_parameters=reply, reply_markup=self.card_keyboard(roll))
+        self.h.remember_card(roll, sent)
 
     # ------------------------------------------------------------ кнопки
 

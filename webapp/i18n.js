@@ -71,6 +71,12 @@ window.I18N = (() => {
     "Чтобы крутить номера, подпишись на каналы ниже и нажми «Проверить подписку»": ["To spin plates, subscribe to the channels below and tap Check", "Щоб крутити номери, підпишись на канали нижче й натисни «Перевірити підписку»", "Abonniere die Kanäle unten und tippe auf Prüfen", "Suscríbete a los canales y pulsa Comprobar", "Aşağıdaki kanallara abone ol ve Kontrol et'e dokun"],
     "Подписаться": ["Subscribe", "Підписатися", "Abonnieren", "Suscribirse", "Abone ol"],
     "Проверить подписку": ["Check subscription", "Перевірити підписку", "Abo prüfen", "Comprobar", "Aboneliği kontrol et"],
+    "Продать за": ["Sell for", "Продати за", "Verkaufen für", "Vender por", "Sat:"],
+    "Продано": ["Sold", "Продано", "Verkauft", "Vendido", "Satıldı"],
+    "прокрутов": ["spins", "прокрутів", "Drehungen", "giros", "çevirme"],
+    "Удалить": ["Delete", "Видалити", "Löschen", "Eliminar", "Sil"],
+    "Точно удалить?": ["Delete for sure?", "Точно видалити?", "Wirklich löschen?", "¿Seguro?", "Emin misin?"],
+    "Удалено": ["Deleted", "Видалено", "Gelöscht", "Eliminado", "Silindi"],
     "Собери гараж": ["Build your garage", "Збери гараж", "Bau deine Garage", "Arma tu garaje", "Garajını kur"],
     "Сохраняй лучшие номера, кидай их в чаты и поднимайся в топе игроков": ["Keep the best plates, drop them into chats and climb the leaderboard", "Зберігай найкращі номери, кидай їх у чати й піднімайся в топі", "Behalte die besten, teile sie in Chats und steig in der Bestenliste auf", "Guarda las mejores, compártelas en chats y sube en la tabla", "En iyileri sakla, sohbetlere at ve sıralamada yüksel"],
   };

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,24 @@ def _energy_packs() -> list[dict]:
         return default
 
 
+#: Сколько прокрутов бот даёт за номер каждой редкости. Обычные не выкупаются:
+#: ожидаемая выручка с броска (~0.3) должна быть меньше его цены (1), иначе энергия бесконечна.
+DEFAULT_SELL_PRICES = {"common": 0, "uncommon": 1, "rare": 3, "epic": 10, "legendary": 40, "mythic": 150}
+
+
+def _sell_prices() -> dict:
+    prices = dict(DEFAULT_SELL_PRICES)
+    raw = os.environ.get("SELL_PRICES", "").strip()
+    if raw:
+        try:
+            for k, v in json.loads(raw).items():
+                if k in prices and int(v) >= 0:
+                    prices[k] = int(v)
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return prices
+
+
 def _ids(raw: str) -> tuple[int, ...]:
     return tuple(int(x) for x in raw.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit())
 
@@ -79,7 +98,17 @@ class Config:
     roll_ttl_sec: int = _int("ROLL_TTL_SEC", 86400)
     feed_interval: float = float(os.environ.get("FEED_INTERVAL", "1.0"))
     admin_ids: tuple = _ids(os.environ.get("ADMIN_IDS", ""))                # кто видит /admin
+    storage_chat: str = os.environ.get("STORAGE_CHAT", "").strip()         # склад картинок (id канала/группы)
     group_nudge_every: int = _int("GROUP_NUDGE_EVERY", 100)              # напоминание «.ролл» в группах, 0 — выкл
+    sell_prices: dict = field(default_factory=_sell_prices)              # выкуп номеров за прокруты
+
+    def sell_price(self, roll: dict) -> int:
+        """Сколько прокрутов дадут за номер. 0 — не выкупается или уже продан/сгорел."""
+        if roll.get("sold"):
+            return 0
+        if not roll.get("saved") and not roll.get("forever") and roll.get("expires", 0) < time.time():
+            return 0
+        return int(self.sell_prices.get(roll["eval"]["tier"], 0))
     subscribe_ttl: int = _int("SUBSCRIBE_TTL", 600)                      # сколько верим проверке подписки
     report_hour: int = _int("REPORT_HOUR", 21)                           # отчёт по спонсорам, час по Москве
     icon_packs: tuple = tuple(x.strip() for x in os.environ.get("ICON_PACKS", "tgiosicons").split(",") if x.strip())

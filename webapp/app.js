@@ -209,6 +209,34 @@
     $("span:last-child", save).textContent = t(roll && roll.saved ? "В гараже" : "В гараж");
     $("#btn-share").classList.remove("is-done");
     $("#btn-ai").hidden = !state.ai; $("#ai-box").hidden = true;
+    const sell = $("#btn-sell"), price = roll && !roll.sold ? (roll.sell || 0) : 0;
+    sell.hidden = !price && !(roll && roll.sold);
+    sell.disabled = !!(roll && roll.sold);
+    $("#btn-sell-label").textContent = roll && roll.sold ? t("Продано") : `${t("Продать за")} ${price} ⚡`;
+    save.disabled = !!(roll && roll.sold);
+  }
+
+  async function sellRoll(roll, after) {
+    if (!roll || roll.sold || !roll.sell) return;
+    haptic.tap();
+    try {
+      const r = await api("sell", { roll_id: roll.id });
+      roll.sold = true; roll.saved = false; roll.sell = 0;
+      state.garage = r.garage;
+      setEnergy(r.energy, true);
+      haptic.ok();
+      toast(`+${r.gain} ${t("прокрутов")}`);
+      if (after) after();
+    } catch (e) { toast(e.message); haptic.warn(); }
+  }
+  async function deleteRoll(roll) {
+    haptic.warn();
+    try {
+      const r = await api("garage/delete", { roll_id: roll.id });
+      state.garage = r.garage;
+      if (state.current && state.current.id === roll.id) { state.current.saved = false; syncActions(); }
+      renderGarage(); haptic.ok(); toast(t("Удалено"));
+    } catch (e) { toast(e.message); haptic.warn(); }
   }
   function showCurrent(animate) {
     const roll = state.current;
@@ -424,8 +452,9 @@
     const g = state.garage;
     $("#garage-empty").hidden = true;
     $("#garage-stats").innerHTML = `<div><b>${state.stats.spins || 0}</b><span>${t("прокруток")}</span></div><div><b>${state.stats.best_score || 0}</b><span>${t("рекорд очков")}</span></div><div><b>${g.length}/${state.stats.slots || 0}</b><span>${t("мест в гараже")}</span></div>`;
-    $("#garage-list").innerHTML = g.map((r, i) => `<div class="garage-item" style="--tier:${r.eval.tier_color};animation-delay:${i * 50}ms">${mini(r.plate, "mid")}
-      <div class="garage-info"><b>${priceText(r.plate, r.eval)}</b><span>${esc(tierName(r.eval))} · ${r.eval.score}</span><small>${r.forever ? t("навсегда") : `${t("сгорит через")} ${fmtTtl(r.expires)}`}</small></div></div>`).join("")
+    $("#garage-list").innerHTML = g.map((r, i) => `<div class="garage-card" style="--tier:${r.eval.tier_color};animation-delay:${i * 50}ms"><div class="garage-item">${mini(r.plate, "mid")}
+      <div class="garage-info"><b>${priceText(r.plate, r.eval)}</b><span>${esc(tierName(r.eval))} · ${r.eval.score}</span><small>${r.forever ? t("навсегда") : `${t("сгорит через")} ${fmtTtl(r.expires)}`}</small></div></div>
+      <div class="garage-acts">${r.sell ? `<button type="button" data-sell="${r.id}"><img src="static/img/3d/money.png" alt="">${t("Продать за")} ${r.sell} ⚡</button>` : ""}<button type="button" class="is-danger" data-del="${r.id}">${t("Удалить")}</button></div></div>`).join("")
       + Array.from({ length: Math.max(0, Math.min(5, (state.stats.slots || 0) - g.length)) }, () => `<div class="garage-item is-free"><span class="pw mid"><span class="slot-free"></span></span><div class="garage-info"><small>${t("Свободное место")}</small></div></div>`).join("");
   }
   async function loadTop() {
@@ -583,6 +612,18 @@
   $("#btn-save").addEventListener("click", saveCurrent);
   $("#btn-share").addEventListener("click", shareCurrent);
   $("#btn-ai").addEventListener("click", aiCurrent);
+  $("#btn-sell").addEventListener("click", () => sellRoll(state.current, () => { syncActions(); $(".pf-lip span", rig) && ($(".pf-lip span", rig).textContent = t("Продано")); }));
+  $("#garage-list").addEventListener("click", e => {
+    const sb = e.target.closest("[data-sell]"), db = e.target.closest("[data-del]");
+    if (sb) {
+      const roll = state.garage.find(r => r.id === +sb.dataset.sell);
+      sellRoll(roll, () => { if (state.current && state.current.id === roll.id) { state.current.sold = true; syncActions(); } renderGarage(); });
+    } else if (db) {
+      if (db.dataset.confirm) { deleteRoll(state.garage.find(r => r.id === +db.dataset.del)); return; }
+      haptic.tap(); db.dataset.confirm = "1"; db.textContent = t("Точно удалить?");
+      setTimeout(() => { if (db.isConnected) { delete db.dataset.confirm; db.textContent = t("Удалить"); } }, 3000);
+    }
+  });
   $("#energy").addEventListener("click", () => { haptic.tap(); openEnergy(false); });
 
   I.set(I.saved() || I.guess(tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code));

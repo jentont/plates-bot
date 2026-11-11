@@ -58,6 +58,10 @@ class Storage:
         if "blocked" not in cols:     # старые базы: отметка «заблокировал бота» для рассылки и статистики
             self.db.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
+        if "sold" not in {r["name"] for r in self.db.execute("PRAGMA table_info(rolls)")}:   # выкуп за прокруты
+            self.db.execute("ALTER TABLE rolls ADD COLUMN sold INTEGER NOT NULL DEFAULT 0")
+            self.db.execute("ALTER TABLE rolls ADD COLUMN sold_for INTEGER NOT NULL DEFAULT 0")
+            self.db.commit()
         self.lock = threading.Lock()
         self.energy_max, self.regen_sec, self.free_slots, self.ttl = energy_max, regen_sec, free_slots, ttl_sec
 
@@ -170,7 +174,7 @@ class Storage:
 
     def garage(self, user_id: int) -> list[dict]:
         rows = self.db.execute(
-            "SELECT * FROM rolls WHERE user_id=? AND saved=1 AND (forever=1 OR expires>?) ORDER BY score DESC, id DESC",
+            "SELECT * FROM rolls WHERE user_id=? AND saved=1 AND sold=0 AND (forever=1 OR expires>?) ORDER BY score DESC, id DESC",
             (user_id, time.time())).fetchall()
         return [self._roll(r) for r in rows]
 
@@ -180,16 +184,50 @@ class Storage:
             row = self.db.execute("SELECT * FROM rolls WHERE id=? AND user_id=?", (roll_id, user_id)).fetchone()
             if not row:
                 return "missing", None
+            if row["sold"]:
+                return "sold", self._roll(row)
             if row["saved"] and (row["forever"] or not forever):
                 return "ok", self._roll(row)
             slots = self.stats(user_id)["slots"]
-            used = self.db.execute("SELECT COUNT(*) FROM rolls WHERE user_id=? AND saved=1 AND (forever=1 OR expires>?)",
+            used = self.db.execute("SELECT COUNT(*) FROM rolls WHERE user_id=? AND saved=1 AND sold=0 AND (forever=1 OR expires>?)",
                                    (user_id, time.time())).fetchone()[0]
             if not row["saved"] and used >= slots and not forever:
                 return "full", self._roll(row)
             self.db.execute("UPDATE rolls SET saved=1, forever=? WHERE id=?", (1 if forever else row["forever"], roll_id))
             self.db.commit()
             return "ok", self.get_roll(roll_id)
+
+    def sell_roll(self, roll_id: int, user_id: int, price_of) -> tuple[str, dict | None, int]:
+        """Продать номер боту. Возвращает ('ok'|'missing'|'sold'|'expired'|'cheap', roll, сколько прокрутов дали).
+
+        Одна транзакция: «sold=0» в условии UPDATE не даёт продать номер дважды при двойном нажатии.
+        """
+        with self.lock:
+            row = self.db.execute("SELECT * FROM rolls WHERE id=? AND user_id=?", (roll_id, user_id)).fetchone()
+            if not row:
+                return "missing", None, 0
+            roll = self._roll(row)
+            if roll["sold"]:
+                return "sold", roll, 0
+            if not roll["saved"] and roll["expires"] < time.time():
+                return "expired", roll, 0
+            gain = price_of(roll)
+            if gain <= 0:
+                return "cheap", roll, 0
+            cur = self.db.execute("UPDATE rolls SET sold=1, sold_for=?, saved=0 WHERE id=? AND sold=0", (gain, roll_id))
+            if not cur.rowcount:
+                return "sold", roll, 0
+            self.db.commit()
+        self.add_energy(user_id, gain)
+        return "ok", self.get_roll(roll_id), gain
+
+    def drop_from_garage(self, roll_id: int, user_id: int) -> dict | None:
+        """Убрать номер из гаража насовсем: место освобождается, вернуть нельзя."""
+        with self.lock:
+            cur = self.db.execute("UPDATE rolls SET saved=0, forever=0, expires=0 WHERE id=? AND user_id=? AND saved=1",
+                                  (roll_id, user_id))
+            self.db.commit()
+        return self.get_roll(roll_id) if cur.rowcount else None
 
     def top(self, limit: int = 10) -> list[dict]:
         rows = self.db.execute(
@@ -210,7 +248,8 @@ class Storage:
     def _roll(row: sqlite3.Row) -> dict:
         return {"id": row["id"], "user_id": row["user_id"], "plate": json.loads(row["plate"]), "eval": json.loads(row["eval"]),
                 "created": row["created"], "expires": row["expires"], "saved": bool(row["saved"]),
-                "forever": bool(row["forever"]), "source": row["source"]}
+                "forever": bool(row["forever"]), "source": row["source"],
+                "sold": bool(row["sold"]) if "sold" in row.keys() else False}
 
     # ------------------------------------------------------------ ai cache
 
@@ -312,5 +351,7 @@ class Storage:
             "inline": one("SELECT COUNT(*) FROM rolls WHERE source='inline'"),
             "mythic": one("SELECT COUNT(*) FROM rolls WHERE score>=80"),
             "groups": one("SELECT COUNT(*) FROM chats WHERE active=1"),
+            "sold": one("SELECT COUNT(*) FROM rolls WHERE sold=1"),
+            "sold_for": one("SELECT COALESCE(SUM(sold_for), 0) FROM rolls WHERE sold=1"),
             "group_rolls": one("SELECT COUNT(*) FROM rolls WHERE source='group'"),
         }

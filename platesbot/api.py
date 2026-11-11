@@ -113,7 +113,10 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         return web.json_response({"error": code, **extra}, status=status)
 
     def roll_payload(roll: dict) -> dict:
-        return {k: roll[k] for k in ("id", "plate", "eval", "created", "expires", "saved", "forever")}
+        out = {k: roll[k] for k in ("id", "plate", "eval", "created", "expires", "saved", "forever")}
+        out["sold"] = roll.get("sold", False)
+        out["sell"] = config.sell_price(roll)
+        return out
 
     @routes.get("/")
     async def index(request):
@@ -133,6 +136,7 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
             "stats": storage.stats(uid),
             "last": roll_payload(last) if last else None,
             "ai": bool(ai),
+            "sell_prices": config.sell_prices,
             "energy_packs": config.energy_packs,
         })
 
@@ -203,6 +207,29 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         return web.json_response({"ok": True, "roll": roll_payload(roll), "forever": roll["forever"],
                                   "garage": [roll_payload(r) for r in garage],
                                   "slots_left": max(0, storage.stats(user["id"])["slots"] - len(garage))})
+
+    @routes.post("/api/garage/delete")
+    async def garage_delete(request):
+        user = user_of(request)
+        body = await request.json()
+        roll = storage.drop_from_garage(int(body.get("roll_id", 0)), user["id"])
+        if not roll:
+            return err(404, "Номера уже нет в гараже")
+        return web.json_response({"ok": True, "garage": [roll_payload(r) for r in storage.garage(user["id"])]})
+
+    @routes.post("/api/sell")
+    async def sell(request):
+        """Продать номер боту за прокруты."""
+        user = user_of(request)
+        body = await request.json()
+        status, roll, gain = storage.sell_roll(int(body.get("roll_id", 0)), user["id"], config.sell_price)
+        if status != "ok":
+            texts = {"missing": "Номер не найден", "sold": "Этот номер уже продан",
+                     "expired": "Номер сгорел", "cheap": "Обычные номера бот не выкупает"}
+            return err(409 if status != "missing" else 404, texts[status])
+        return web.json_response({"ok": True, "gain": gain, "roll": roll_payload(roll),
+                                  "energy": storage.energy(user["id"]),
+                                  "garage": [roll_payload(r) for r in storage.garage(user["id"])]})
 
     @routes.post("/api/settings")
     async def settings(request):

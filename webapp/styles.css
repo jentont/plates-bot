@@ -263,6 +263,15 @@ h2 { font: 800 18px/1.2 var(--font); letter-spacing: -.02em; }
 .garage-info span { display: block; margin-top: 2px; font-size: 12px; font-weight: 700; color: var(--tier); }
 .garage-info small { display: block; margin-top: 2px; color: var(--hint); font-size: 11.5px; font-weight: 500; }
 .garage-item.is-free { background: none; border-style: dashed; }
+.garage-card { border-radius: 18px; background: var(--card); border: 1px solid var(--line); overflow: hidden; animation: rise .4s var(--ease) both; }
+.garage-card .garage-item { border: 0; border-radius: 0; background: none; animation: none; }
+.garage-acts { display: flex; border-top: 1px solid var(--line); }
+.garage-acts button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; font-size: 13px; font-weight: 700; color: var(--text-2); }
+.garage-acts button + button { border-left: 1px solid var(--line); }
+.garage-acts button img { width: 18px; height: 18px; }
+.garage-acts button.is-danger { color: var(--bad); }
+.garage-acts button:active { background: var(--soft); }
+.btn-sell img { flex: none; }
 .slot-free { display: block; width: 100%; aspect-ratio: 4.64 / 1; border-radius: 2.4cqw; border: 1.5px dashed rgba(255, 255, 255, .16); }
 .podium { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 8px; }
 .pod { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; animation: rise .5s var(--ease) both; }

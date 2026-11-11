@@ -32,6 +32,7 @@ def panel_kb() -> dict:
         [B("📢 Спонсоры", "a:sp")],
         [B("📊 Статистика", "a:stats"), B("📨 Рассылка", "a:post")],
         [B("✨ Премиум-эмодзи", "a:pack"), B("🖼 Баннер меню", "a:ban")],
+        [B("🗄 Склад картинок", "a:store")],
     ])
 
 
@@ -39,6 +40,7 @@ class Admin:
     def __init__(self, tg: Telegram, storage, sponsors, config):
         self.tg, self.storage, self.sponsors, self.config = tg, storage, sponsors, config
         self.state: dict[int, tuple[str, dict]] = {}
+        self.cards = None          # CardStore, подключается в main после создания обработчиков
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.config.admin_ids
@@ -60,7 +62,8 @@ class Admin:
             return False
         name, data = st
         handler = {"channel": self._got_channel, "link": self._got_link, "goal": self._got_goal,
-                   "post": self._got_post, "pack": self._got_pack, "banner": self._got_banner}.get(name)
+                   "post": self._got_post, "pack": self._got_pack, "banner": self._got_banner,
+                   "store": self._got_store}.get(name)
         if handler:
             await handler(user["id"], m, data)
             return True
@@ -156,6 +159,20 @@ class Admin:
                                  f"Сейчас: {'свой' if custom else 'стандартный — анимация прокрутки А777АА 777'}.\n"
                                  "Пришли картинку, GIF или видео без звука, чтобы поставить своё. Лучше всего 1280×720.",
                             kb(rows + [BACK]))
+        elif action == "store":
+            self.state[uid] = ("store", {})
+            chat = self.cards.chat_id() if self.cards else None
+            await self.edit(msg, (
+                "🗄 <b>Склад картинок</b>\n\n"
+                f"Сейчас: {f'<code>{chat}</code>' if chat else 'не задан — инлайн берёт картинки по ссылке PUBLIC_URL'}\n\n"
+                "Склад — приватный канал или группа, куда бот складывает карточки номеров и берёт их file_id. "
+                "С ним инлайн-броски грузятся быстрее и не зависят от того, видит ли Telegram наш сервер.\n\n"
+                "Сделай бота админом канала и пришли сюда любой пост оттуда (переслать) или id канала (-100…)."),
+                kb(([[B("❌ Отключить склад", "a:store0")]] if chat else []) + [BACK]))
+        elif action == "store0":
+            self.state.pop(uid, None)
+            self.storage.set_setting("storage_chat", "0")
+            await self.edit(msg, "✅ Склад отключён, инлайн снова берёт картинки по ссылке.", kb([BACK]))
         elif action == "ban0":
             self.state.pop(uid, None)
             self.storage.set_setting("menu_banner", "")
@@ -189,6 +206,7 @@ class Admin:
                 f"🎯 Бросков: <b>{s['rolls']}</b> (+{s['rolls_today']} за сутки)\n"
                 f"📤 Инлайн-бросков: <b>{s['inline']}</b>\n"
                 f"👥 Групп с ботом: <b>{s['groups']}</b>, бросков в группах: <b>{s['group_rolls']}</b>\n"
+                f"💰 Продано номеров: <b>{s['sold']}</b> за <b>{s['sold_for']}</b> прокрутов\n"
                 f"⭐ Сохранено в гаражи: <b>{s['saved']}</b>\n"
                 f"👑 Мифических номеров: <b>{s['mythic']}</b>\n"
                 f"❌ Заблокировали бота: <b>{s['blocked']}</b>")
@@ -333,6 +351,23 @@ class Admin:
         self.storage.set_setting("icon_packs", ",".join(names))
         self.state.pop(uid, None)
         await self.send(uid, "✅ Готово, эмодзи уже применяются.\n\n" + self._pack_text(), kb([[B("⬅️ Назад", "a:pack")]]))
+
+    async def _got_store(self, uid: int, m: dict, data: dict) -> None:
+        origin = m.get("forward_origin") or {}
+        chat = origin.get("chat") or m.get("forward_from_chat")
+        raw = chat["id"] if chat else (m.get("text") or "").strip()
+        try:
+            raw = int(raw)
+        except (TypeError, ValueError):
+            await self.send(uid, "Перешли пост из канала-склада или пришли его id, например <code>-1001234567890</code>.")
+            return
+        chat_id, note = await self.cards.set_chat(raw)
+        if not chat_id:
+            await self.send(uid, f"❗ Склад не отвечает: {html.escape(note)}\nБот добавлен в канал админом?")
+            return
+        self.state.pop(uid, None)
+        await self.send(uid, f"✅ Склад подключён: <b>{html.escape(note)}</b> (<code>{chat_id}</code>). "
+                             "Там уже лежит пробная картинка.", kb([BACK]))
 
     async def _got_banner(self, uid: int, m: dict, data: dict) -> None:
         photos = m.get("photo") or []
