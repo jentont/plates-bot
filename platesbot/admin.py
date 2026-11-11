@@ -153,8 +153,8 @@ class Admin:
             custom = bool(self.storage.get_setting("menu_banner"))
             rows = [[B("✅ Вернуть стандартный", "a:ban0")]] if custom else []
             await self.edit(msg, "🖼 <b>Баннер главного меню</b>\n\n"
-                                 f"Сейчас: {'свой' if custom else 'стандартный, номер А777АА 777'}.\n"
-                                 "Пришли картинку, чтобы поставить свою. Лучше всего 1280×720.",
+                                 f"Сейчас: {'свой' if custom else 'стандартный — анимация прокрутки А777АА 777'}.\n"
+                                 "Пришли картинку, GIF или видео без звука, чтобы поставить своё. Лучше всего 1280×720.",
                             kb(rows + [BACK]))
         elif action == "ban0":
             self.state.pop(uid, None)
@@ -335,10 +335,15 @@ class Admin:
 
     async def _got_banner(self, uid: int, m: dict, data: dict) -> None:
         photos = m.get("photo") or []
-        if not photos:
-            await self.send(uid, "Нужна картинка — пришли фото.")
+        anim = m.get("animation") or m.get("video")
+        if anim:
+            value = "anim:" + anim["file_id"]
+        elif photos:
+            value = "photo:" + photos[-1]["file_id"]
+        else:
+            await self.send(uid, "Нужна картинка, GIF или видео — пришли ещё раз.")
             return
-        self.storage.set_setting("menu_banner", photos[-1]["file_id"])
+        self.storage.set_setting("menu_banner", value)
         self.state.pop(uid, None)
         await self.send(uid, "✅ Баннер меню обновлён. Проверь: /start", kb([BACK]))
 

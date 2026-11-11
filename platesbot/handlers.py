@@ -14,7 +14,9 @@ from .tg import Telegram, TelegramError, btn, esc, kb
 log = logging.getLogger("handlers")
 
 
-BANNER = Path(__file__).resolve().parent.parent / "assets" / "brand" / "banner_1280.png"
+BRAND = Path(__file__).resolve().parent.parent / "assets" / "brand"
+BANNER = BRAND / "banner_1280.png"
+SPIN_ANIM = BRAND / "spin.mp4"
 
 
 def app_button(config: Config, tg: Telegram, text: str = "✨ Открыть приложение") -> dict | None:
@@ -154,16 +156,40 @@ class Handlers:
                 "Докупить: /energy\n"
                 "🌟 Напиши свой номер, например <code>А777АА 777</code>, — оценю.")
 
+    async def _send_media(self, kind: str, file_id: str, chat_id: int, caption: str, markup: dict) -> bool:
+        method, field = ("sendAnimation", "animation") if kind == "anim" else ("sendPhoto", "photo")
+        try:
+            await self.tg(method, chat_id=chat_id, caption=caption, parse_mode="HTML", reply_markup=markup,
+                          **{field: file_id})
+            return True
+        except TelegramError as e:
+            log.warning("баннер %s не ушёл: %s", kind, e)
+            return False
+
     async def send_banner(self, chat_id: int, caption: str, markup: dict) -> None:
-        """Сообщение с баннером: свой из админки, иначе стандартный (file_id кэшируется после первой загрузки)."""
-        file_id = self.storage.get_setting("menu_banner") or self.storage.get_setting("menu_banner_default")
-        if file_id:
+        """Главное меню с баннером: свой из админки (фото или анимация), иначе анимация прокрутки
+        А777АА 777, иначе картинка. file_id кэшируется после первой загрузки."""
+        custom = self.storage.get_setting("menu_banner")
+        if custom:
+            kind, _, file_id = custom.partition(":") if custom.startswith(("anim:", "photo:")) else ("photo", "", custom)
+            if await self._send_media(kind, file_id, chat_id, caption, markup):
+                return
+        cached = self.storage.get_setting("menu_anim_default")
+        if cached and await self._send_media("anim", cached, chat_id, caption, markup):
+            return
+        if SPIN_ANIM.exists():
             try:
-                await self.tg("sendPhoto", chat_id=chat_id, photo=file_id, caption=caption, parse_mode="HTML",
-                              reply_markup=markup)
+                sent = await self.tg("sendAnimation", files={"animation": ("spin.mp4", SPIN_ANIM.read_bytes())},
+                                     chat_id=chat_id, caption=caption, parse_mode="HTML", reply_markup=markup)
+                media = sent.get("animation") or sent.get("document") or {}
+                if media.get("file_id"):
+                    self.storage.set_setting("menu_anim_default", media["file_id"])
                 return
             except TelegramError as e:
-                log.warning("баннер по file_id не ушёл: %s", e)
+                log.warning("анимация меню не ушла: %s", e)
+        cached = self.storage.get_setting("menu_banner_default")
+        if cached and await self._send_media("photo", cached, chat_id, caption, markup):
+            return
         if BANNER.exists():
             sent = await self.tg("sendPhoto", files={"photo": ("banner.png", BANNER.read_bytes())}, chat_id=chat_id,
                                  caption=caption, parse_mode="HTML", reply_markup=markup)
