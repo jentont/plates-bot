@@ -106,3 +106,10 @@ CSS `currentColor`, поэтому один файл работает и для 
 - Шрифты Manrope, Unbounded и Barlow распространяются по лицензии SIL OFL (файл OFL.txt рядом со шрифтами).
 - Круглые флаги: circle-flags (MIT). Объёмные PNG: Microsoft Fluent Emoji 3D (MIT). Лежат в `webapp/img`.
 - Причины редкости приходят с сервера на русском и пока не переводятся.
+
+## Оформление бота
+
+- Описание и короткое описание (ru и en) лежат в `bot/texts.py`, бот выставляет их сам при запуске.
+- Аватарка и картинка описания: `assets/brand/`. Перерисовать: `python tools/make_brand.py`.
+- Аватарку ставят в @BotFather командой `/setuserpic` (файл `avatar_640.png` или `avatar_1024.png`),
+  картинку описания — командой `/setdescriptionpic` (файл `banner_640.png`, 640x360).

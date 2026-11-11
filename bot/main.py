@@ -34,6 +34,15 @@ async def setup_bot(tg: Telegram) -> None:
         {"command": "widget", "description": "Живой виджет в чате"},
         {"command": "help", "description": "Как играть"},
     ])
+    from . import texts
+    try:
+        for lang, short, full in (("", texts.SHORT_DESCRIPTION, texts.DESCRIPTION),
+                                  ("ru", texts.SHORT_DESCRIPTION, texts.DESCRIPTION),
+                                  ("en", texts.SHORT_DESCRIPTION_EN, texts.DESCRIPTION_EN)):
+            await tg("setMyShortDescription", short_description=short, language_code=lang or None)
+            await tg("setMyDescription", description=full, language_code=lang or None)
+    except TelegramError as e:
+        log.warning("setMyDescription: %s", e)
     if config.webapp_url:
         try:
             await tg("setChatMenuButton", menu_button={"type": "web_app", "text": "Крутить", "web_app": {"url": config.webapp_url}})
