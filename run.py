@@ -10,7 +10,7 @@ for _a in sys.argv:
     if _a.startswith("--port="):
         os.environ["PORT"] = _a.split("=", 1)[1]
 
-from bot.main import run  # noqa: E402
+from platesbot.main import run  # noqa: E402
 
 if __name__ == "__main__":
     try:

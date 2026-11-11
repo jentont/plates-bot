@@ -1,7 +1,7 @@
 """Точка входа: запускает HTTP-сервер мини-апы и long polling бота в одном процессе.
 
-    python -m bot.main            # бот + сервер
-    DEV_MODE=1 python -m bot.main # сервер без токена: мини-апа открывается в браузере
+    python run.py            # бот + сервер
+    python run.py --dev          # сервер без токена: мини-апа открывается в браузере
 """
 from __future__ import annotations
 

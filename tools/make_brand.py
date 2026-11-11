@@ -16,7 +16,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from bot.render import _holder, _logo, _mix, _spark, _tw, font  # noqa: E402
+from platesbot.render import _holder, _logo, _mix, _spark, _tw, font  # noqa: E402
 from core.plates import parse_ru  # noqa: E402
 
 OUT = ROOT / "assets" / "brand"

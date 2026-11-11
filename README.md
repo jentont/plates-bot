@@ -15,15 +15,15 @@
 | Оценка редкости и цены | `core/rarity.py` |
 | Мини-апа (без сборки) | `webapp/index.html`, `webapp/app.js`, `webapp/styles.css` |
 | Кастомные TGS-иконки (Lottie) | `tools/make_icons.py` → `webapp/icons/*.tgs` |
-| Бот (тонкий клиент Bot API, long polling) | `bot/tg.py`, `bot/handlers.py` |
-| HTTP-сервер мини-апы и API, лента SSE | `bot/api.py` |
-| HTML-виджет для чата (sendWidget) | `bot/widget.py` |
-| PNG-карточки для чата и inline | `bot/render.py` |
-| Оценка нейросетью (Claude, опционально) | `bot/ai.py` |
-| SQLite | `bot/storage.py` |
+| Бот (тонкий клиент Bot API, long polling) | `platesbot/tg.py`, `platesbot/handlers.py` |
+| HTTP-сервер мини-апы и API, лента SSE | `platesbot/api.py` |
+| HTML-виджет для чата (sendWidget) | `platesbot/widget.py` |
+| PNG-карточки для чата и inline | `platesbot/render.py` |
+| Оценка нейросетью (Claude, опционально) | `platesbot/ai.py` |
+| SQLite | `platesbot/storage.py` |
 
 Бот написан без сторонних библиотек: в них ещё нет методов `sendWidget`, `answerWidgetQuery`,
-`editMessageWidgetData` из Bot API 10.4 (9 ноября 2026). Клиент в `bot/tg.py` вызывает
+`editMessageWidgetData` из Bot API 10.4 (9 ноября 2026). Клиент в `platesbot/tg.py` вызывает
 любой метод как `await tg("method", param=value)`.
 
 ## Запуск
@@ -58,6 +58,9 @@ docker compose up -d --build
 `docker run --rm -p 8080:8080 -e DEV_MODE=1 $(docker build -q .)`.
 
 ### Bothost
+
+Пакет называется `platesbot`, а не `bot`: Bothost монтирует свою папку в `/app/bot`, и пакет с таким именем перестаёт находиться (`No module named 'bot.main'`).
+
 
 1. Создать бота из репозитория и включить «Использовать собственный Dockerfile», иначе хостинг может принять проект за Node из-за файлов `.js`.
 2. В переменных окружения указать `BOT_TOKEN` и `PUBLIC_URL` — домен бота из панели, например `https://bot-xxx.bothost.tech`, без слеша на конце.
@@ -99,7 +102,7 @@ CSS `currentColor`, поэтому один файл работает и для 
 
 ## Виджет в чате
 
-`/start` и `/widget` отправляют HTML-виджет (`bot/widget.py`): номер, редкость, цена,
+`/start` и `/widget` отправляют HTML-виджет (`platesbot/widget.py`): номер, редкость, цена,
 кнопка «Крутить». По нажатию виджет шлёт `request("roll")`, бот отвечает через
 `answerWidgetQuery` и обновляет состояние через `editMessageWidgetData`. Размер HTML
 после zlib ~2.3 КБ при лимите 4 КБ. Виджеты пока работают только в личных чатах с ботом.
@@ -116,7 +119,7 @@ CSS `currentColor`, поэтому один файл работает и для 
 
 ## Оформление бота
 
-- Описание и короткое описание (ru и en) лежат в `bot/texts.py`, бот выставляет их сам при запуске.
+- Описание и короткое описание (ru и en) лежат в `platesbot/texts.py`, бот выставляет их сам при запуске.
 - Аватарка и картинка описания: `assets/brand/`. Перерисовать: `python tools/make_brand.py`.
 - Аватарку ставят в @BotFather командой `/setuserpic` (файл `avatar_640.png` или `avatar_1024.png`),
   картинку описания — командой `/setdescriptionpic` (файл `banner_640.png`, 640x360).
