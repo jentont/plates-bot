@@ -46,6 +46,17 @@ ngrok http 8080
 В BotFather: включить inline-режим (`/setinline`), по желанию задать название мини-апы
 (`/newapp`) — тогда ссылка вида `t.me/<bot>/<app>` тоже будет работать.
 
+### Docker
+
+```bash
+cp .env.example .env     # вписать BOT_TOKEN и PUBLIC_URL
+docker compose up -d --build
+```
+
+Сервер слушает порт 8080, база игроков хранится в томе `plates-data` и переживает пересборку.
+Логи: `docker compose logs -f`. Без токена можно запустить только мини-апу:
+`docker run --rm -p 8080:8080 -e DEV_MODE=1 $(docker build -q .)`.
+
 ### Только мини-апа в браузере (без бота)
 
 ```bash
