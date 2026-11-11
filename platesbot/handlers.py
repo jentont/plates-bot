@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from core.rarity import format_price
 
@@ -13,10 +14,13 @@ from .tg import Telegram, TelegramError, btn, esc, kb
 log = logging.getLogger("handlers")
 
 
-def app_button(config: Config, tg: Telegram, text: str = "Открыть приложение") -> dict | None:
+BANNER = Path(__file__).resolve().parent.parent / "assets" / "brand" / "banner_1280.png"
+
+
+def app_button(config: Config, tg: Telegram, text: str = "✨ Открыть приложение") -> dict | None:
     if not config.webapp_url:
         return None
-    return btn(text, web_app=config.webapp_url)
+    return btn(text, web_app=config.webapp_url, style="primary")
 
 
 def app_link(config: Config, tg: Telegram) -> str:
@@ -27,7 +31,7 @@ def energy_keyboard(config: Config) -> dict | None:
     """Кнопки покупки энергии за Stars: по одной на набор."""
     if not config.energy_packs:
         return None
-    return kb([[btn(f"+{p['amount']} энергии — {p['stars']} Stars", f"buy:{p['id']}")] for p in config.energy_packs])
+    return kb([[btn(f"⚡ +{p['amount']} энергии за {p['stars']} Stars", f"buy:{p['id']}")] for p in config.energy_packs])
 
 
 def regen_text(sec: int) -> str:
@@ -40,17 +44,17 @@ def roll_caption(game: Game, roll: dict) -> str:
     top = f"топ {ev.percentile}%" if ev.percentile <= 50 else f"{ev.score} очков"
     reasons = ", ".join(r["title"].lower() for r in ev.reasons if r["points"]) or "без особых признаков"
     where = game.country_name(plate.country) + (f", {plate.region_name}" if plate.region_name else "")
-    return (f"<b>{esc(plate.text)}</b> — {esc(where)}\n"
-            f"{esc(ev.tier_name)} · {top}\n"
-            f"Оценка: <b>{esc(price)}</b>\n"
+    return (f"🌟 <b>{esc(plate.text)}</b> — {esc(where)}\n"
+            f"👑 {esc(ev.tier_name)} · {top}\n"
+            f"💰 Оценка: <b>{esc(price)}</b>\n"
             f"<i>{esc(reasons)}</i>")
 
 
 def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
     rows = []
     if not roll["saved"]:
-        rows.append([btn("Сохранить в гараж", f"save:{roll['id']}")])
-    rows.append([btn("Крутить ещё", "roll"), btn("Поделиться", switch_inline_query=f"{roll['id']}")])
+        rows.append([btn("⭐ Сохранить в гараж", f"save:{roll['id']}", style="primary")])
+    rows.append([btn("⚡ Крутить ещё", "roll"), btn("📤 Поделиться", switch_inline_query=f"{roll['id']}")])
     ab = app_button(config, tg)
     if ab:
         rows.append([ab])
@@ -66,8 +70,9 @@ async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, r
 
 
 class Handlers:
-    def __init__(self, tg: Telegram, game: Game, config: Config):
+    def __init__(self, tg: Telegram, game: Game, config: Config, sponsors=None, admin=None):
         self.tg, self.game, self.config = tg, game, config
+        self.sponsors, self.admin = sponsors, admin
         self._inline_busy: set[str] = set()   # инлайн-сообщения, где бросок уже идёт (двойное нажатие)
         self._inline_done: set[str] = set()   # уже брошенные: запоздалое второе нажатие не перебрасывает номер
         self.storage = game.storage
@@ -77,8 +82,12 @@ class Handlers:
     async def handle(self, upd: dict) -> None:
         try:
             if "message" in upd:
+                if self.admin and await self.admin.on_message(upd["message"]):
+                    return
                 await self.on_message(upd["message"])
             elif "callback_query" in upd:
+                if self.admin and await self.admin.on_callback(upd["callback_query"]):
+                    return
                 await self.on_callback(upd["callback_query"])
             elif "inline_query" in upd:
                 await self.on_inline(upd["inline_query"])
@@ -101,6 +110,8 @@ class Handlers:
             return
         text = (m.get("text") or "").strip()
         cmd = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
+        if not await self.gate(user):
+            return
         if cmd == "/start":
             await self.cmd_start(user)
         elif cmd in ("/roll", "/spin"):
@@ -120,58 +131,106 @@ class Handlers:
                 price = format_price(ev, "RU")
                 reasons = "\n".join(f"· {r['title']} +{r['points']}" for r in ev.reasons if r["points"]) or "· без особых признаков"
                 await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML",
-                              text=f"<b>{esc(plate.text)}</b> — {esc(plate.region_name or '')}\n{esc(ev.tier_name)} · {ev.score} очков · топ {ev.percentile}%\nОценка: <b>{esc(price)}</b>\n{esc(reasons)}")
+                              text=f"🌟 <b>{esc(plate.text)}</b> — {esc(plate.region_name or '')}\n👑 {esc(ev.tier_name)} · {ev.score} очков · топ {ev.percentile}%\n💰 Оценка: <b>{esc(price)}</b>\n{esc(reasons)}")
             else:
                 await self.cmd_help(user)
 
-    async def cmd_start(self, user: dict) -> None:
-        rows = []
-        ab = app_button(self.config, self.tg, "Открыть приложение")
-        if ab:
-            rows.append([ab])
-        rows.append([btn("Бросить номер", "roll"), btn("В любой чат", switch_inline_query="")])
-        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", reply_markup=kb(rows),
-                      text=(f"Привет, {esc(user.get('first_name') or 'водитель')}.\n\n"
-                            "Крути номера — российские и со всего мира. За каждый бросок получаешь номер и его оценку: "
-                            "редкость, очки, цена на рынке. Лучшие сохраняй в гараж.\n\n"
-                            f"Энергия: {self.config.energy_max} бросков, +1 каждые {regen_text(self.config.energy_regen_sec)}. "
-                            "Докупить: /energy\n"
-                            "Напиши свой номер (например <code>А777АА 777</code>) — оценю."))
-
-    async def cmd_help(self, user: dict) -> None:
+    def menu_keyboard(self, user: dict) -> dict:
         rows = []
         ab = app_button(self.config, self.tg)
         if ab:
             rows.append([ab])
-        rows.append([btn("Бросить номер", "roll")])
-        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", reply_markup=kb(rows),
-                      text="/roll — бросить номер\n/garage — гараж\n/top — лучшие игроки\n/energy — энергия и покупка за Stars\n"
-                           "В любом чате: напиши @" + esc(self.tg.me.get("username", "")) + " и выбери бросок.")
+        rows.append([btn("⚡ Бросить номер", "roll")])
+        rows.append([btn("📤 В любой чат", switch_inline_query="")])
+        if self.admin and self.admin.is_admin(user["id"]):
+            rows.append([btn("⚙️ Админка", "a:main")])
+        return kb(rows)
+
+    def menu_text(self, user: dict) -> str:
+        return (f"✨ Привет, <b>{esc(user.get('first_name') or 'водитель')}</b>.\n\n"
+                "Крути номера — российские и со всего мира. За каждый бросок получаешь номер и его оценку: "
+                "редкость, очки, цена на рынке. Лучшие сохраняй в гараж.\n\n"
+                f"⚡ Энергия: {self.config.energy_max} бросков, +1 каждые {regen_text(self.config.energy_regen_sec)}. "
+                "Докупить: /energy\n"
+                "🌟 Напиши свой номер, например <code>А777АА 777</code>, — оценю.")
+
+    async def send_banner(self, chat_id: int, caption: str, markup: dict) -> None:
+        """Сообщение с баннером: свой из админки, иначе стандартный (file_id кэшируется после первой загрузки)."""
+        file_id = self.storage.get_setting("menu_banner") or self.storage.get_setting("menu_banner_default")
+        if file_id:
+            try:
+                await self.tg("sendPhoto", chat_id=chat_id, photo=file_id, caption=caption, parse_mode="HTML",
+                              reply_markup=markup)
+                return
+            except TelegramError as e:
+                log.warning("баннер по file_id не ушёл: %s", e)
+        if BANNER.exists():
+            sent = await self.tg("sendPhoto", files={"photo": ("banner.png", BANNER.read_bytes())}, chat_id=chat_id,
+                                 caption=caption, parse_mode="HTML", reply_markup=markup)
+            try:
+                self.storage.set_setting("menu_banner_default", sent["photo"][-1]["file_id"])
+            except (KeyError, IndexError, TypeError):
+                pass
+            return
+        await self.tg("sendMessage", chat_id=chat_id, text=caption, parse_mode="HTML", reply_markup=markup)
+
+    async def cmd_start(self, user: dict) -> None:
+        await self.send_banner(user["id"], self.menu_text(user), self.menu_keyboard(user))
+
+    # ------------------------------------------------------------ обязательная подписка
+
+    def gate_markup(self, rows: list[dict]) -> dict:
+        buttons = []
+        for row in rows:
+            link = self.sponsors.link_of(row)
+            if link:
+                buttons.append([btn(f"📢 {row['title']}", url=link)])
+        buttons.append([btn("✅ Проверить подписку", "check", style="success")])
+        return kb(buttons)
+
+    async def gate(self, user: dict, notify: bool = True) -> bool:
+        """True — можно играть. Иначе шлёт просьбу подписаться на спонсоров."""
+        if not self.sponsors:
+            return True
+        need = await self.sponsors.missing(user["id"])
+        if not need:
+            return True
+        if notify:
+            await self.send_banner(user["id"],
+                                   f"🔒 <b>{esc(user.get('first_name') or 'Водитель')}</b>, чтобы крутить номера, "
+                                   "подпишись на каналы спонсоров. Потом нажми «Проверить подписку».",
+                                   self.gate_markup(need))
+        return False
+
+    async def cmd_help(self, user: dict) -> None:
+        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", reply_markup=self.menu_keyboard(user),
+                      text="⚡ /roll — бросить номер\n⭐ /garage — гараж\n👑 /top — лучшие игроки\n💰 /energy — энергия и покупка за Stars\n"
+                           "📤 В любом чате: напиши @" + esc(self.tg.me.get("username", "")) + " и выбери бросок.")
 
     async def cmd_garage(self, user: dict) -> None:
         garage = self.storage.garage(user["id"])
         stats = self.storage.stats(user["id"])
         if not garage:
-            text = "Гараж пуст. Брось номер и сохрани его."
+            text = "⭐ Гараж пуст. Брось номер и сохрани его."
         else:
             lines = []
             for r in garage:
                 plate, ev = self.game.roll_objects(r)
                 lines.append(f"<b>{esc(plate.text)}</b> · {esc(ev.tier_name)} · {esc(format_price(ev, plate.country))}" + (" · навсегда" if r["forever"] else ""))
-            text = f"Гараж {len(garage)}/{stats['slots']}\n\n" + "\n".join(lines)
+            text = f"⭐ <b>Гараж</b> {len(garage)}/{stats['slots']}\n\n" + "\n".join(lines)
         await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", text=text)
 
     async def cmd_top(self, user: dict) -> None:
         top = self.storage.top(10)
         if not top:
-            text = "Пока никто не крутил. Будь первым: /roll"
+            text = "👑 Пока никто не крутил. Будь первым: /roll"
         else:
-            text = "Лучшие номера\n\n" + "\n".join(f"{i + 1}. {esc(t['name'])} — <b>{esc(t['plate_text'])}</b> · {t['score']} очков" for i, t in enumerate(top))
+            text = "👑 <b>Лучшие номера</b>\n\n" + "\n".join(f"{i + 1}. {esc(t['name'])} — <b>{esc(t['plate_text'])}</b> · {t['score']} очков" for i, t in enumerate(top))
         await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", text=text)
 
     async def cmd_energy(self, user: dict) -> None:
         en = self.storage.energy(user["id"])
-        text = f"Энергия: <b>{en['current']}</b> из {en['max']}."
+        text = f"⚡ Энергия: <b>{en['current']}</b> из {en['max']}."
         if en["current"] < en["max"]:
             text += f"\n+1 через {en['next_in'] // 60} мин {en['next_in'] % 60} с (каждые {regen_text(self.config.energy_regen_sec)})."
         elif en["current"] > en["max"]:
@@ -196,11 +255,11 @@ class Handlers:
             en = self.storage.energy(user["id"])
             params = {}
             markup = energy_keyboard(self.config)
-            text = f"Энергия кончилась. Следующий бросок через {en['next_in'] // 60} мин {en['next_in'] % 60} с."
+            text = f"⌛ Энергия кончилась. Следующий бросок через {en['next_in'] // 60} мин {en['next_in'] % 60} с."
             if markup:
                 text += "\nИли докупи энергию за Stars:"
                 params["reply_markup"] = markup
-            await self.tg("sendMessage", chat_id=user["id"], text=text, **params)
+            await self.tg("sendMessage", chat_id=user["id"], text=text, parse_mode="HTML", **params)
             return
         await send_roll_card(self.tg, self.game, self.config, user, roll)
 
@@ -210,6 +269,32 @@ class Handlers:
         user = cq["from"]
         data = cq.get("data", "")
         self.storage.touch_user(user)
+        if data == "check":
+            need = await self.sponsors.missing(user["id"], fresh=True) if self.sponsors else []
+            if need:
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
+                              text="Ещё не на всех подписан. Подпишись и нажми ещё раз.")
+                msg = cq.get("message")
+                if msg:
+                    try:
+                        await self.tg("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                                      reply_markup=self.gate_markup(need))
+                    except TelegramError:
+                        pass
+                return
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Готово, можно крутить")
+            msg = cq.get("message")
+            if msg:
+                try:
+                    await self.tg("deleteMessage", chat_id=msg["chat"]["id"], message_id=msg["message_id"])
+                except TelegramError:
+                    pass
+            await self.cmd_start(user)
+            return
+        if data == "roll" or data.startswith(("save:", "buy:")):
+            if not await self.gate(user):
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+                return
         if data == "roll":
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             await self.do_roll(user, "chat")
@@ -250,7 +335,7 @@ class Handlers:
                                   payload=f"forever:{roll['id']}", currency="XTR",
                                   prices=[{"label": "Сохранить навсегда", "amount": self.config.stars_forever}])
                 else:
-                    await self.tg("sendMessage", chat_id=user["id"], text="Гараж полон. Освободи место: /garage")
+                    await self.tg("sendMessage", chat_id=user["id"], text="⭐ Гараж полон. Освободи место: /garage", parse_mode="HTML")
             else:
                 await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Номер не найден")
             return
@@ -283,20 +368,20 @@ class Handlers:
         name = esc(user.get("first_name") or "Игрок")
         for kind, title, desc in (("ru", "Бросить российский номер", "Нажми «Крутить» — номер упадёт в чат"),
                                   ("world", "Бросить номер мира", "Любая из 19 стран")):
-            markup = kb([[btn("Крутить", f"ir:{kind}:{user['id']}")]])
-            caption = f"{name} бросает номер. Нажми «Крутить»"
+            markup = kb([[btn("Крутить", f"ir:{kind}:{user['id']}", style="primary")]])
+            caption = f"⚡ <b>{name}</b> бросает номер. Нажми «Крутить»"
             if self.config.public_url:
                 results.append({
                     "type": "photo", "id": f"roll_{kind}",
                     "photo_url": f"{self.config.public_url}/card/cover_{kind}.png?v=2",
                     "thumbnail_url": f"{self.config.public_url}/card/cover_{kind}.png?v=2",
                     "photo_width": 1200, "photo_height": 675,
-                    "title": title, "description": desc, "caption": caption, "reply_markup": markup,
+                    "title": title, "description": desc, "caption": caption, "parse_mode": "HTML", "reply_markup": markup,
                 })
             else:
                 results.append({
                     "type": "article", "id": f"roll_{kind}", "title": title, "description": desc,
-                    "input_message_content": {"message_text": caption}, "reply_markup": markup,
+                    "input_message_content": {"message_text": caption, "parse_mode": "HTML"}, "reply_markup": markup,
                 })
         # поделиться конкретной прокруткой (кнопка «Поделиться» под карточкой передаёт её id)
         if query.isdigit():
@@ -344,6 +429,10 @@ class Handlers:
         if imid in self._inline_busy or imid in self._inline_done:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Номер уже брошен")
             return
+        if self.sponsors and await self.sponsors.missing(user["id"]):
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
+                          text=f"Сначала подпишись на спонсоров: открой @{bot} и нажми «Проверить подписку»")
+            return
         self._inline_busy.add(imid)
         try:
             try:
@@ -357,8 +446,8 @@ class Handlers:
                 self._inline_done.clear()
             self._inline_done.add(imid)
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
-            markup = kb([[btn("Крутить свой", switch_inline_query_current_chat="")],
-                         [btn("Открыть бота", url=app_link(self.config, self.tg))]])
+            markup = kb([[btn("⚡ Крутить свой", switch_inline_query_current_chat="", style="primary")],
+                         [btn("✨ Открыть бота", url=app_link(self.config, self.tg))]])
             if self.config.public_url:
                 await self.tg("editMessageMedia", inline_message_id=imid, reply_markup=markup,
                               media={"type": "photo", "media": f"{self.config.public_url}/card/{roll['id']}.png",

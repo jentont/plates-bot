@@ -59,6 +59,10 @@ def _energy_packs() -> list[dict]:
         return default
 
 
+def _ids(raw: str) -> tuple[int, ...]:
+    return tuple(int(x) for x in raw.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit())
+
+
 @dataclass(frozen=True)
 class Config:
     bot_token: str = os.environ.get("BOT_TOKEN", "")
@@ -74,6 +78,10 @@ class Config:
     stars_forever: int = _int("STARS_FOREVER", 10)                     # 0 — отключить покупку «навсегда»
     roll_ttl_sec: int = _int("ROLL_TTL_SEC", 86400)
     feed_interval: float = float(os.environ.get("FEED_INTERVAL", "1.0"))
+    admin_ids: tuple = _ids(os.environ.get("ADMIN_IDS", ""))                # кто видит /admin
+    subscribe_ttl: int = _int("SUBSCRIBE_TTL", 600)                      # сколько верим проверке подписки
+    report_hour: int = _int("REPORT_HOUR", 21)                           # отчёт по спонсорам, час по Москве
+    icon_packs: tuple = tuple(x.strip() for x in os.environ.get("ICON_PACKS", "tgiosicons").split(",") if x.strip())
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     ai_model: str = os.environ.get("AI_MODEL", "claude-opus-5-5")
     energy_packs: list = field(default_factory=_energy_packs)          # наборы энергии за Stars

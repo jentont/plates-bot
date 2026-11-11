@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS rolls (
 );
 CREATE INDEX IF NOT EXISTS rolls_user ON rolls(user_id, created);
 CREATE TABLE IF NOT EXISTS ai_cache (text TEXT PRIMARY KEY, data TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS sponsors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER, title TEXT NOT NULL, username TEXT, link TEXT NOT NULL DEFAULT '',
+    goal INTEGER NOT NULL DEFAULT 0, joined INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1, created REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sponsor_joins (
+    sponsor_id INTEGER NOT NULL, user_id INTEGER NOT NULL, ts REAL NOT NULL,
+    PRIMARY KEY (sponsor_id, user_id)
+);
 """
 
 
@@ -42,6 +53,10 @@ class Storage:
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
+        if "blocked" not in cols:     # старые базы: отметка «заблокировал бота» для рассылки и статистики
+            self.db.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
+            self.db.commit()
         self.lock = threading.Lock()
         self.energy_max, self.regen_sec, self.free_slots, self.ttl = energy_max, regen_sec, free_slots, ttl_sec
 
@@ -56,7 +71,7 @@ class Storage:
                     "INSERT INTO users(id, username, first_name, energy, energy_ts, created) VALUES (?,?,?,?,?,?)",
                     (tg_user["id"], tg_user.get("username"), tg_user.get("first_name", ""), self.energy_max, now, now))
             else:
-                self.db.execute("UPDATE users SET username=?, first_name=? WHERE id=?",
+                self.db.execute("UPDATE users SET username=?, first_name=?, blocked=0 WHERE id=?",
                                 (tg_user.get("username"), tg_user.get("first_name", ""), tg_user["id"]))
             self.db.commit()
             return self.db.execute("SELECT * FROM users WHERE id=?", (tg_user["id"],)).fetchone()
@@ -207,3 +222,85 @@ class Storage:
             self.db.execute("INSERT OR REPLACE INTO ai_cache(text, data, created) VALUES (?,?,?)",
                             (text, json.dumps(data, ensure_ascii=False), time.time()))
             self.db.commit()
+
+    # ------------------------------------------------------------ settings
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?,?)", (key, value))
+            self.db.commit()
+
+    # ------------------------------------------------------------ sponsors
+
+    def sponsors(self, active_only: bool = True) -> list[dict]:
+        sql = "SELECT * FROM sponsors" + (" WHERE active=1" if active_only else "") + " ORDER BY id"
+        return [dict(r) for r in self.db.execute(sql)]
+
+    def sponsor(self, sponsor_id: int) -> dict | None:
+        row = self.db.execute("SELECT * FROM sponsors WHERE id=?", (sponsor_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_sponsor(self, chat_id: int | None, title: str, username: str | None, link: str, goal: int = 0) -> int:
+        with self.lock:
+            cur = self.db.execute("INSERT INTO sponsors(chat_id, title, username, link, goal, created) VALUES (?,?,?,?,?,?)",
+                                  (chat_id, title, username, link, goal, time.time()))
+            self.db.commit()
+            return cur.lastrowid
+
+    def set_sponsor(self, sponsor_id: int, **fields) -> None:
+        allowed = {k: v for k, v in fields.items() if k in ("title", "link", "goal", "active")}
+        if not allowed:
+            return
+        with self.lock:
+            self.db.execute("UPDATE sponsors SET " + ", ".join(f"{k}=?" for k in allowed) + " WHERE id=?",
+                            (*allowed.values(), sponsor_id))
+            self.db.commit()
+
+    def drop_sponsor(self, sponsor_id: int) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM sponsors WHERE id=?", (sponsor_id,))
+            self.db.execute("DELETE FROM sponsor_joins WHERE sponsor_id=?", (sponsor_id,))
+            self.db.commit()
+
+    def sponsor_joined(self, sponsor_id: int, user_id: int) -> bool:
+        """Засчитать вступление через бота. True — новое."""
+        with self.lock:
+            cur = self.db.execute("INSERT OR IGNORE INTO sponsor_joins(sponsor_id, user_id, ts) VALUES (?,?,?)",
+                                  (sponsor_id, user_id, time.time()))
+            if cur.rowcount:
+                self.db.execute("UPDATE sponsors SET joined=joined+1 WHERE id=?", (sponsor_id,))
+            self.db.commit()
+            return bool(cur.rowcount)
+
+    def sponsor_today(self, sponsor_id: int) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM sponsor_joins WHERE sponsor_id=? AND ts>?",
+                               (sponsor_id, time.time() - 86400)).fetchone()[0]
+
+    # ------------------------------------------------------------ admin
+
+    def audience(self) -> list[int]:
+        return [r[0] for r in self.db.execute("SELECT id FROM users WHERE blocked=0")]
+
+    def mark_blocked(self, user_id: int) -> None:
+        with self.lock:
+            self.db.execute("UPDATE users SET blocked=1 WHERE id=?", (user_id,))
+            self.db.commit()
+
+    def global_stats(self) -> dict:
+        day = time.time() - 86400
+        one = lambda sql, *a: self.db.execute(sql, a).fetchone()[0]  # noqa: E731
+        return {
+            "users": one("SELECT COUNT(*) FROM users"),
+            "today": one("SELECT COUNT(*) FROM users WHERE created>?", day),
+            "blocked": one("SELECT COUNT(*) FROM users WHERE blocked=1"),
+            "active": one("SELECT COUNT(DISTINCT user_id) FROM rolls WHERE created>?", day),
+            "rolls": one("SELECT COUNT(*) FROM rolls"),
+            "rolls_today": one("SELECT COUNT(*) FROM rolls WHERE created>?", day),
+            "saved": one("SELECT COUNT(*) FROM rolls WHERE saved=1"),
+            "inline": one("SELECT COUNT(*) FROM rolls WHERE source='inline'"),
+            "mythic": one("SELECT COUNT(*) FROM rolls WHERE score>=80"),
+        }

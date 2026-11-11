@@ -93,7 +93,7 @@ class Feed:
 
 # ------------------------------------------------------------ приложение
 
-def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None) -> web.Application:
+def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsors=None) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     storage = game.storage
     routes = web.RouteTableDef()
@@ -170,6 +170,10 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None) -> web.
     async def spin(request):
         user = user_of(request)
         body = await request.json() if request.can_read_body else {}
+        if sponsors:
+            need = await sponsors.missing(user["id"], fresh=bool(body.get("recheck")))
+            if need:
+                return err(403, "subscribe", sponsors=[{"title": r["title"], "link": sponsors.link_of(r)} for r in need])
         try:
             roll = game.spin(user, "app", body.get("country"))
         except NoEnergy:

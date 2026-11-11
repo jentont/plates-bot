@@ -233,7 +233,7 @@
     $("#recent").innerHTML = history.map(r => `<div class="recent-item" style="--tier:${r.eval.tier_color}">${mini(r.plate, "")}<b>${priceText(r.plate, r.eval)}</b><small>${esc(tierName(r.eval))}</small></div>`).join("");
   }
 
-  async function spin() {
+  async function spin(recheck) {
     if (state.rolling) return;
     if (state.energy.current <= 0) { haptic.warn(); openEnergy(true); return; }
     state.rolling = true;
@@ -251,14 +251,16 @@
     let stop = startRolling(blank);
     const t0 = performance.now();
     let roll, err;
-    try { roll = (await api("spin", {})).roll; } catch (e) { err = e; }
+    try { roll = (await api("spin", recheck === true ? { recheck: true } : {})).roll; } catch (e) { err = e; }
     await sleep(Math.max(0, 900 - (performance.now() - t0)));
     stop();
 
     if (err) {
       scene.classList.remove("is-fast"); state.rolling = false; btnSpin.classList.remove("is-rolling");
       showCurrent(false); if (!state.current) setSpinLabel("Крутить");
-      if (err.code === "no_energy") { if (err.data.energy) setEnergy(err.data.energy); openEnergy(true); } else toast(err.message);
+      if (err.code === "no_energy") { if (err.data.energy) setEnergy(err.data.energy); openEnergy(true); }
+      else if (err.code === "subscribe") openSponsors(err.data.sponsors || []);
+      else toast(err.message);
       haptic.warn();
       return;
     }
@@ -364,6 +366,24 @@
         for (let i = 0; i < 8; i++) { await sleep(700); try { const en = await api("energy"); if (en.current > before) { setEnergy(en, true); haptic.ok(); toast(t("Энергия пополнена")); return; } } catch (e) { /* повторим */ } }
       });
     } catch (e) { toast(e.message); haptic.warn(); }
+  }
+
+  /* ------------------------------------------------------------ Обязательная подписка */
+  function openSponsors(list) {
+    openSheet(`<h2>${t("Подпишись на спонсоров")}</h2><p>${t("Чтобы крутить номера, подпишись на каналы ниже и нажми «Проверить подписку»")}</p>
+      <div class="packs">${list.map(s => `<button class="pack" type="button" data-link="${esc(s.link)}">
+        <span class="pack-art"><img src="static/img/3d/key.png" alt=""></span>
+        <span class="pack-name"><b>${esc(s.title)}</b><small>${t("Подписаться")}</small></span></button>`).join("")}</div>
+      <button class="btn btn-primary btn-wide" id="sp-check" type="button">${t("Проверить подписку")}</button>`);
+    $$(".pack[data-link]", $("#sheet")).forEach(b => b.addEventListener("click", () => {
+      haptic.tap();
+      const link = b.dataset.link;
+      if (!link) return;
+      if (tg && link.startsWith("https://t.me/")) tg.openTelegramLink(link);
+      else if (tg) tg.openLink(link);
+      else window.open(link, "_blank");
+    }));
+    $("#sp-check").addEventListener("click", () => { closeSheet(); spin(true); });
   }
 
   /* ------------------------------------------------------------ Шторка */

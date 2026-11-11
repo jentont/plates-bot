@@ -28,6 +28,23 @@ class Telegram:
         self.me: dict = {}
 
     async def __call__(self, method: str, files: dict[str, tuple[str, bytes]] | None = None, **params: Any) -> Any:
+        """Вызов с премиум-эмодзи и цветными кнопками; на отказе Telegram — без украшений."""
+        from . import emoji
+        params = {k: v for k, v in params.items() if v is not None}
+        sent = emoji.dress_request(method, params)
+        for _ in range(3):
+            try:
+                return await self.raw(method, files, **sent)
+            except TelegramError as e:
+                if e.code != 400:
+                    raise
+                fixed = emoji.undress_request(method, sent, e.description)
+                if fixed is None:
+                    raise
+                sent = fixed
+        return await self.raw(method, files, **sent)
+
+    async def raw(self, method: str, files: dict[str, tuple[str, bytes]] | None = None, **params: Any) -> Any:
         """files: {"photo": ("card.png", b"...")} — отправляется multipart; остальное — JSON."""
         params = {k: v for k, v in params.items() if v is not None}
         if files:
@@ -48,10 +65,10 @@ class Telegram:
     async def poll(self, allowed_updates: list[str], timeout: int = 30):
         """Генератор апдейтов long polling."""
         offset = None
-        await self("deleteWebhook", drop_pending_updates=False)
+        await self.raw("deleteWebhook", drop_pending_updates=False)
         while True:
             try:
-                updates = await self("getUpdates", offset=offset, timeout=timeout, allowed_updates=allowed_updates)
+                updates = await self.raw("getUpdates", offset=offset, timeout=timeout, allowed_updates=allowed_updates)
             except (aiohttp.ClientError, asyncio.TimeoutError, TelegramError) as e:
                 log.warning("getUpdates failed: %s", e)
                 await asyncio.sleep(3)
@@ -68,7 +85,9 @@ def kb(rows: list[list[dict]]) -> dict:
 
 
 def btn(text: str, callback_data: str | None = None, url: str | None = None, web_app: str | None = None,
-        switch_inline_query: str | None = None, switch_inline_query_current_chat: str | None = None) -> dict:
+        switch_inline_query: str | None = None, switch_inline_query_current_chat: str | None = None,
+        style: str | None = None) -> dict:
+    """style: "primary" — синяя, "success" — зелёная, "danger" — красная (Bot API 9.4)."""
     b: dict[str, Any] = {"text": text}
     if callback_data is not None:
         b["callback_data"] = callback_data
@@ -80,6 +99,8 @@ def btn(text: str, callback_data: str | None = None, url: str | None = None, web
         b["switch_inline_query"] = switch_inline_query
     if switch_inline_query_current_chat is not None:
         b["switch_inline_query_current_chat"] = switch_inline_query_current_chat
+    if style:
+        b["style"] = style
     return b
 
 

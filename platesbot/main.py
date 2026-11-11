@@ -33,6 +33,17 @@ async def setup_bot(tg: Telegram) -> None:
         {"command": "top", "description": "Лучшие игроки"},
         {"command": "help", "description": "Как играть"},
     ])
+    for admin_id in config.admin_ids:      # админам — ещё и /admin в меню команд
+        try:
+            await tg("setMyCommands", scope={"type": "chat", "chat_id": admin_id}, commands=[
+                {"command": "admin", "description": "Админ-панель"},
+                {"command": "roll", "description": "Бросить номер"},
+                {"command": "energy", "description": "Энергия и покупка за Stars"},
+                {"command": "garage", "description": "Мой гараж"},
+                {"command": "top", "description": "Лучшие игроки"},
+            ])
+        except TelegramError as e:
+            log.warning("команды админа %s: %s", admin_id, e)
     from . import texts
     try:
         for lang, short, full in (("", texts.SHORT_DESCRIPTION, texts.DESCRIPTION),
@@ -64,7 +75,9 @@ async def run() -> None:
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=70)) as session:
         tg = Telegram(config.bot_token, session) if config.bot_token else None
-        app = create_app(config, game, feed, tg=tg, ai=ai)
+        from .sponsors import Sponsors
+        sponsors = Sponsors(tg, storage, config)
+        app = create_app(config, game, feed, tg=tg, ai=ai, sponsors=sponsors)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, config.host, config.port)
@@ -73,9 +86,15 @@ async def run() -> None:
 
         tasks = [asyncio.create_task(feed.run())]
         if tg:
+            from . import emoji
+            from .admin import Admin
             from .handlers import Handlers
             await setup_bot(tg)
-            handlers = Handlers(tg, game, config)
+            admin = Admin(tg, storage, sponsors, config)
+            # Премиум-эмодзи: паки из админки, иначе ICON_PACKS (по умолчанию tgiosicons)
+            await emoji.load(tg, admin.packs())
+            handlers = Handlers(tg, game, config, sponsors=sponsors, admin=admin)
+            tasks.append(asyncio.create_task(sponsors.report_loop()))
 
             async def polling():
                 async for upd in tg.poll(ALLOWED_UPDATES):
