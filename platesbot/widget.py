@@ -17,8 +17,8 @@ WIDGET_HEIGHT = 330
 HTML = r"""<style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{margin:0;background:#0A0A0C}
-#r{font-family:system-ui,sans-serif;background:#0A0A0C;color:#F2F3F5;border-radius:18px;padding:16px;height:330px;position:relative;overflow:hidden}
-#glow{position:absolute;left:10%;right:10%;top:40px;height:160px;border-radius:50%;background:var(--g,transparent);opacity:.35;filter:blur(40px);transition:background .5s}
+#r{font-family:system-ui,sans-serif;background:#0A0A0C;color:#F2F3F5;border-radius:18px;padding:16px;min-height:330px;position:relative}
+#glow{position:absolute;left:10%;right:10%;top:40px;height:120px;border-radius:50%;background:var(--g,transparent);opacity:.35;filter:blur(40px);transition:background .5s}
 .hd{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#8B8F98;font-weight:600;position:relative}
 .hd b{color:#F2F3F5;font-size:15px}
 .en{color:#F2F3F5}
