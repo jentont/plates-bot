@@ -89,7 +89,7 @@ h2 { font: 800 18px/1.2 var(--font); letter-spacing: -.02em; }
 .plate-strip { flex: none; width: 10.5%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 1.6cqw; padding-bottom: 2cqw; background: #0A3A9A; color: #fff; font-size: 5cqw; font-weight: 600; }
 .plate-strip img { width: 6.4cqw; height: 6.4cqw; border-radius: 50%; }
 .plate-by .plate-strip { background: none; color: var(--plate-ink); border-right: max(1px, .5cqw) solid #0d0d0d; }
-.plate-ua .plate-strip { background: linear-gradient(#1F5FBF 50%, #F4CE1B 50%); color: #0A3A9A; }
+.plate-ua .plate-strip { background: #1046AA; }
 .plate-ae .plate-strip { width: 24%; justify-content: center; padding: 0; background: #C8202A; font-size: 6.4cqw; letter-spacing: .02em; }
 .plate-gb { background: linear-gradient(180deg, #FFD94A, #F2BE00); }
 .plate-cn { background: linear-gradient(180deg, #1A56C9, #0B3FA6); color: #fff; border-color: #fff; outline: max(1px, .5cqw) solid #0B3FA6; }

@@ -195,11 +195,9 @@ def _plate_image(plate: Plate, w: int) -> Image.Image:
     text, strip, top_pad = plate.text, 0, 0
     if st in ("eu", "ua", "kz", "uz", "ge", "am", "by"):
         strip = int(w * .105)
-        color = {"ua": (31, 95, 191), "by": bg}.get(st, (10, 58, 154))
+        color = {"ua": (16, 70, 170), "by": bg}.get(st, (10, 58, 154))
         d.rounded_rectangle([bw, bw, strip, h - bw - 1], radius=max(2, rad - bw), fill=color)
         d.rectangle([strip - rad, bw, strip, h - bw - 1], fill=color)
-        if st == "ua":
-            d.rectangle([bw, h // 2, strip, h - bw - rad], fill=(244, 206, 27))
         if st == "by":
             d.line([(strip, bw), (strip, h - bw)], fill=border, width=max(2, bw // 2))
         f_cc = font("plate", int(h * .24))
@@ -347,9 +345,12 @@ def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_na
     d.text((92, y0), ev.tier_name, font=f_tier, fill=color)
     meta = (f"топ {ev.percentile or 0.01}%  ·  " if ev.percentile <= 50 else "") + f"{ev.score} очков"
     d.text((92 + _tw(d, ev.tier_name, f_tier) + 22, y0 + 6), meta, font=f_small, fill=MUTED)
-    price = format_price(ev, plate.country)
-    f_price = _fit(d, price, "display", 70, 560)
-    d.text((58, y0 + 56), price, font=f_price, fill=TEXT if ev.price_rub else MUTED)
+    if ev.price_rub:
+        price = format_price(ev, plate.country)
+        f_price = _fit(d, price, "display", 70, 560)
+        d.text((58, y0 + 56), price, font=f_price, fill=TEXT)
+    else:   # обычный номер: вместо огромного «$0» — спокойная подпись
+        d.text((60, y0 + 80), "Без наценки", font=font("display", 40), fill=MUTED)
     # шкала из шести уровней
     tiers = ["#8E97A8", "#5FB2FF", "#7C6CFF", "#E85CFF", "#FFB020", "#FF3B3B"]
     idx = max(i for i, c in enumerate(tiers) if c.lower() == ev.tier_color.lower()) if ev.tier_color.upper() in [c.upper() for c in tiers] else 0
