@@ -20,7 +20,7 @@ from .tg import Telegram, TelegramError
 
 log = logging.getLogger("main")
 
-ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "chosen_inline_result", "widget_query", "pre_checkout_query"]
+ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "pre_checkout_query"]
 
 
 async def setup_bot(tg: Telegram) -> None:
@@ -31,7 +31,6 @@ async def setup_bot(tg: Telegram) -> None:
         {"command": "energy", "description": "Энергия и покупка за Stars"},
         {"command": "garage", "description": "Мой гараж"},
         {"command": "top", "description": "Лучшие игроки"},
-        {"command": "widget", "description": "Живой виджет в чате"},
         {"command": "help", "description": "Как играть"},
     ])
     from . import texts

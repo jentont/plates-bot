@@ -1,8 +1,7 @@
 """Тонкий клиент Bot API поверх aiohttp.
 
-Написан сам, без сторонних библиотек, потому что нужны методы Bot API 10.4
-(sendWidget, answerWidgetQuery, editMessageWidgetData), которых в библиотеках
-ещё нет. Любой метод вызывается как `await tg("methodName", param=value)`.
+Написан сам, без сторонних библиотек: так проще поддерживать свежие методы
+Bot API. Любой метод вызывается как `await tg("methodName", param=value)`.
 """
 from __future__ import annotations
 
@@ -69,7 +68,7 @@ def kb(rows: list[list[dict]]) -> dict:
 
 
 def btn(text: str, callback_data: str | None = None, url: str | None = None, web_app: str | None = None,
-        switch_inline_query: str | None = None) -> dict:
+        switch_inline_query: str | None = None, switch_inline_query_current_chat: str | None = None) -> dict:
     b: dict[str, Any] = {"text": text}
     if callback_data is not None:
         b["callback_data"] = callback_data
@@ -79,6 +78,8 @@ def btn(text: str, callback_data: str | None = None, url: str | None = None, web
         b["web_app"] = {"url": web_app}
     if switch_inline_query is not None:
         b["switch_inline_query"] = switch_inline_query
+    if switch_inline_query_current_chat is not None:
+        b["switch_inline_query_current_chat"] = switch_inline_query_current_chat
     return b
 
 

@@ -393,7 +393,7 @@ def render_cover(bot_name: str, subtitle: str) -> bytes:
     f_title = _fit(d, subtitle, "display", 40, W - 160)
     d.text(((W - _tw(d, subtitle, f_title)) // 2, 468), subtitle, font=f_title, fill=TEXT)
     f_small = font("text", 26)
-    hint = "Номер упадёт через секунду"
+    hint = "Нажми «Крутить» — номер упадёт сюда"
     d.text(((W - _tw(d, hint, f_small)) // 2, 532), hint, font=f_small, fill=MUTED)
     tag = f"@{bot_name}"
     d.text((W - 60 - _tw(d, tag, font("text", 23)), H - 70), tag, font=font("text", 23), fill=MUTED)

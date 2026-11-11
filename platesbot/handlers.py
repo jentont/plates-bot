@@ -1,7 +1,6 @@
-"""Обработчики апдейтов Telegram: команды, кнопки, inline-режим, виджеты, Stars."""
+"""Обработчики апдейтов Telegram: команды, кнопки, inline-режим, Stars."""
 from __future__ import annotations
 
-import json
 import logging
 
 from core.rarity import format_price
@@ -10,7 +9,6 @@ from .config import Config
 from .game import Game, NoEnergy
 from .render import render_card
 from .tg import Telegram, TelegramError, btn, esc, kb
-from .widget import WIDGET_HEIGHT, chat_data, public_data, widget_html
 
 log = logging.getLogger("handlers")
 
@@ -70,6 +68,8 @@ async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, r
 class Handlers:
     def __init__(self, tg: Telegram, game: Game, config: Config):
         self.tg, self.game, self.config = tg, game, config
+        self._inline_busy: set[str] = set()   # инлайн-сообщения, где бросок уже идёт (двойное нажатие)
+        self._inline_done: set[str] = set()   # уже брошенные: запоздалое второе нажатие не перебрасывает номер
         self.storage = game.storage
 
     # ------------------------------------------------------------ dispatch
@@ -82,10 +82,6 @@ class Handlers:
                 await self.on_callback(upd["callback_query"])
             elif "inline_query" in upd:
                 await self.on_inline(upd["inline_query"])
-            elif "chosen_inline_result" in upd:
-                await self.on_chosen(upd["chosen_inline_result"])
-            elif "widget_query" in upd:
-                await self.on_widget_query(upd["widget_query"])
             elif "pre_checkout_query" in upd:
                 await self.tg("answerPreCheckoutQuery", pre_checkout_query_id=upd["pre_checkout_query"]["id"], ok=True)
         except TelegramError as e:
@@ -113,8 +109,6 @@ class Handlers:
             await self.cmd_garage(user)
         elif cmd == "/top":
             await self.cmd_top(user)
-        elif cmd == "/widget":
-            await self.send_widget(user)
         elif cmd == "/energy":
             await self.cmd_energy(user)
         elif cmd in ("/app", "/help"):
@@ -143,7 +137,6 @@ class Handlers:
                             f"Энергия: {self.config.energy_max} бросков, +1 каждые {regen_text(self.config.energy_regen_sec)}. "
                             "Докупить: /energy\n"
                             "Напиши свой номер (например <code>А777АА 777</code>) — оценю."))
-        await self.send_widget(user, quiet=True)
 
     async def cmd_help(self, user: dict) -> None:
         rows = []
@@ -152,7 +145,7 @@ class Handlers:
             rows.append([ab])
         rows.append([btn("Бросить номер", "roll")])
         await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", reply_markup=kb(rows),
-                      text="/roll — бросить номер\n/garage — гараж\n/top — лучшие игроки\n/widget — живой виджет в чате\n/energy — энергия и покупка за Stars\n"
+                      text="/roll — бросить номер\n/garage — гараж\n/top — лучшие игроки\n/energy — энергия и покупка за Stars\n"
                            "В любом чате: напиши @" + esc(self.tg.me.get("username", "")) + " и выбери бросок.")
 
     async def cmd_garage(self, user: dict) -> None:
@@ -221,6 +214,15 @@ class Handlers:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             await self.do_roll(user, "chat")
             return
+        if data.startswith("ir:"):
+            try:
+                _, kind, owner = data.split(":")
+                owner_id = int(owner)
+            except ValueError:
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+                return
+            await self.on_inline_roll(cq, kind, owner_id)
+            return
         if data.startswith("buy:"):
             pack = self.config.energy_pack(data[4:])
             if not pack:
@@ -276,25 +278,25 @@ class Handlers:
         self.storage.touch_user(user)
         query = (q.get("query") or "").strip()
         results = []
-        if self.config.public_url:
-            for kind, title, desc in (("ru", "Бросить российский номер", "Выпадет случайный номер и его оценка"),
-                                      ("world", "Бросить номер мира", "Любая из 19 стран")):
+        # Бросок в любом чате: картинка-заготовка и кнопка «Крутить». Номер падает по нажатию,
+        # поэтому не нужен inline feedback в BotFather (chosen_inline_result).
+        name = esc(user.get("first_name") or "Игрок")
+        for kind, title, desc in (("ru", "Бросить российский номер", "Нажми «Крутить» — номер упадёт в чат"),
+                                  ("world", "Бросить номер мира", "Любая из 19 стран")):
+            markup = kb([[btn("Крутить", f"ir:{kind}:{user['id']}")]])
+            caption = f"{name} бросает номер. Нажми «Крутить»"
+            if self.config.public_url:
                 results.append({
                     "type": "photo", "id": f"roll_{kind}",
-                    "photo_url": f"{self.config.public_url}/card/cover_{kind}.png",
-                    "thumbnail_url": f"{self.config.public_url}/card/cover_{kind}.png",
+                    "photo_url": f"{self.config.public_url}/card/cover_{kind}.png?v=2",
+                    "thumbnail_url": f"{self.config.public_url}/card/cover_{kind}.png?v=2",
                     "photo_width": 1200, "photo_height": 675,
-                    "title": title, "description": desc,
-                    "caption": "Бросаю номер…",
-                    "reply_markup": kb([[btn("Открыть бота", url=app_link(self.config, self.tg))]]),
+                    "title": title, "description": desc, "caption": caption, "reply_markup": markup,
                 })
-        else:
-            for kind, title in (("ru", "Бросить российский номер"), ("world", "Бросить номер мира")):
+            else:
                 results.append({
-                    "type": "article", "id": f"roll_{kind}", "title": title,
-                    "description": "Номер появится в сообщении через секунду",
-                    "input_message_content": {"message_text": "Бросаю номер…"},
-                    "reply_markup": kb([[btn("Открыть бота", url=app_link(self.config, self.tg))]]),
+                    "type": "article", "id": f"roll_{kind}", "title": title, "description": desc,
+                    "input_message_content": {"message_text": caption}, "reply_markup": markup,
                 })
         # поделиться конкретной прокруткой (кнопка «Поделиться» под карточкой передаёт её id)
         if query.isdigit():
@@ -328,65 +330,42 @@ class Handlers:
                 })
         await self.tg("answerInlineQuery", inline_query_id=q["id"], results=results, cache_time=0, is_personal=True)
 
-    async def on_chosen(self, r: dict) -> None:
-        user = r["from"]
-        rid = r.get("result_id", "")
-        inline_message_id = r.get("inline_message_id")
-        if not rid.startswith("roll_") or not inline_message_id:
+    async def on_inline_roll(self, cq: dict, kind: str, owner_id: int) -> None:
+        """Кнопка «Крутить» под инлайн-сообщением: бросок и замена картинки на карточку номера."""
+        user, imid = cq["from"], cq.get("inline_message_id")
+        bot = self.tg.me.get("username", "")
+        if not imid:
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             return
-        kind = rid[5:]
+        if user["id"] != owner_id:
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
+                          text=f"Это чужой бросок. Чтобы бросить свой номер, напиши @{bot} в этом чате")
+            return
+        if imid in self._inline_busy or imid in self._inline_done:
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Номер уже брошен")
+            return
+        self._inline_busy.add(imid)
         try:
-            roll = self.game.spin(user, "inline", "WORLD" if kind == "world" else "RU")
-        except NoEnergy:
-            en = self.storage.energy(user["id"])
-            await self.tg("editMessageCaption" if self.config.public_url else "editMessageText", inline_message_id=inline_message_id,
-                          **({"caption": f"Энергия кончилась. Ещё бросок через {en['next_in'] // 60} мин."} if self.config.public_url
-                             else {"text": f"Энергия кончилась. Ещё бросок через {en['next_in'] // 60} мин."}))
-            return
-        markup = kb([[btn("Крутить свой", url=app_link(self.config, self.tg))]])
-        if self.config.public_url:
-            await self.tg("editMessageMedia", inline_message_id=inline_message_id, reply_markup=markup,
-                          media={"type": "photo", "media": f"{self.config.public_url}/card/{roll['id']}.png",
-                                 "caption": roll_caption(self.game, roll), "parse_mode": "HTML"})
-        else:
-            await self.tg("editMessageText", inline_message_id=inline_message_id, parse_mode="HTML",
-                          text=roll_caption(self.game, roll), reply_markup=markup)
-
-    # ------------------------------------------------------------ widget (Bot API 10.4)
-
-    async def send_widget(self, user: dict, quiet: bool = False) -> None:
-        last = self.storage.last_roll(user["id"])
-        energy = self.storage.energy(user["id"])
-        cname = self.game.country_name(last["plate"]["country"]) if last else ""
-        try:
-            await self.tg("sendWidget", chat_id=user["id"], html=widget_html(), height=WIDGET_HEIGHT,
-                          allow_queries=True, chat_data=chat_data(last, energy, cname),
-                          public_data=public_data(self.tg.me.get("username", ""), app_link(self.config, self.tg)),
-                          disable_notification=quiet)
-        except TelegramError as e:
-            log.warning("sendWidget unavailable: %s", e)
-            if not quiet:
-                await self.tg("sendMessage", chat_id=user["id"], text="Виджеты недоступны на этом сервере Bot API. Используй /roll или приложение.")
-
-    async def on_widget_query(self, q: dict) -> None:
-        user = q["from"]
-        data = q.get("data", "")
-        self.storage.touch_user(user)
-        if data != "roll":
-            await self.tg("answerWidgetQuery", widget_query_id=q["id"], data=json.dumps({"err": "Неизвестный запрос"}, ensure_ascii=False))
-            return
-        try:
-            roll = self.game.spin(user, "widget")
-        except NoEnergy:
-            en = self.storage.energy(user["id"])
-            await self.tg("answerWidgetQuery", widget_query_id=q["id"],
-                          data=json.dumps({"err": f"Энергия кончилась, +1 через {en['next_in'] // 60} мин"}, ensure_ascii=False))
-            return
-        energy = self.storage.energy(user["id"])
-        cd = chat_data(roll, energy, self.game.country_name(roll["plate"]["country"]))
-        await self.tg("answerWidgetQuery", widget_query_id=q["id"], data=cd)
-        if q.get("chat") and q.get("message_id"):
             try:
-                await self.tg("editMessageWidgetData", chat_id=q["chat"]["id"], message_id=q["message_id"], chat_data=cd)
-            except TelegramError as e:
-                log.warning("editMessageWidgetData: %s", e)
+                roll = self.game.spin(user, "inline", "WORLD" if kind == "world" else "RU")
+            except NoEnergy:
+                en = self.storage.energy(user["id"])
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
+                              text=f"Энергия кончилась. +1 через {en['next_in'] // 60} мин {en['next_in'] % 60} с. Пополнить: /energy в @{bot}")
+                return
+            if len(self._inline_done) > 20000:
+                self._inline_done.clear()
+            self._inline_done.add(imid)
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            markup = kb([[btn("Крутить свой", switch_inline_query_current_chat="")],
+                         [btn("Открыть бота", url=app_link(self.config, self.tg))]])
+            if self.config.public_url:
+                await self.tg("editMessageMedia", inline_message_id=imid, reply_markup=markup,
+                              media={"type": "photo", "media": f"{self.config.public_url}/card/{roll['id']}.png",
+                                     "caption": roll_caption(self.game, roll), "parse_mode": "HTML"})
+            else:
+                await self.tg("editMessageText", inline_message_id=imid, parse_mode="HTML",
+                              text=roll_caption(self.game, roll), reply_markup=markup)
+        finally:
+            self._inline_busy.discard(imid)
+

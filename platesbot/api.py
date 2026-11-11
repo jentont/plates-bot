@@ -19,7 +19,6 @@ from core.rarity import Evaluation
 from .config import Config
 from .game import Game, NoEnergy
 from .render import render_card, render_cover
-from .widget import widget_html
 
 log = logging.getLogger("api")
 WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
@@ -283,37 +282,6 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None) -> web.
     @lru_cache(maxsize=4)
     def _cover_png(title: str) -> bytes:
         return render_cover((tg.me.get("username") if tg else "") or "bot", title)
-
-    if config.dev_mode:
-        @routes.get("/dev/widget")
-        async def dev_widget(request):
-            """Локальный предпросмотр виджета с заглушкой TelegramWidget."""
-            from core.plates import generate
-            from core.rarity import evaluate
-            from .widget import chat_data
-            plate = generate("RU")
-            ev = evaluate(plate)
-            cd = chat_data({"plate": plate.to_dict(), "eval": ev.to_dict()}, {"current": 30, "max": 30}, "Россия")
-            mock = """<script>
-            var TelegramWidget={chatData:%s,publicData:'{"a":"https://t.me"}',isPreview:false,
-              request:function(d){return fetch('/dev/widget_roll').then(function(r){return r.text()}).then(function(t){return {result:t}})},
-              onEvent:function(){},ready:function(){},openTelegramLink:function(u){window.open(u)},
-              HapticFeedback:{impactOccurred:function(){}}};
-            </script>""" % json.dumps(cd, ensure_ascii=False)
-            page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
-                    "<body style='margin:0;background:#1f2a3a;padding:24px;display:flex;justify-content:center'>"
-                    f"<div style='width:360px'>{mock}{widget_html()}</div></body>")   # без высоты обёртки, как в Telegram
-            return web.Response(text=page, content_type="text/html")
-
-        @routes.get("/dev/widget_roll")
-        async def dev_widget_roll(request):
-            from .widget import chat_data
-            user = {"id": 1, "first_name": "Dev"}
-            try:
-                roll = game.spin(user, "widget")
-            except NoEnergy:
-                return web.Response(text=json.dumps({"err": "Энергия кончилась"}, ensure_ascii=False))
-            return web.Response(text=chat_data(roll, storage.energy(1), game.country_name(roll["plate"]["country"])))
 
     app.add_routes(routes)
     app.router.add_static("/static/", WEBAPP_DIR, show_index=False)
