@@ -79,6 +79,7 @@ class Config:
     roll_ttl_sec: int = _int("ROLL_TTL_SEC", 86400)
     feed_interval: float = float(os.environ.get("FEED_INTERVAL", "1.0"))
     admin_ids: tuple = _ids(os.environ.get("ADMIN_IDS", ""))                # кто видит /admin
+    group_nudge_every: int = _int("GROUP_NUDGE_EVERY", 100)              # напоминание «.ролл» в группах, 0 — выкл
     subscribe_ttl: int = _int("SUBSCRIBE_TTL", 600)                      # сколько верим проверке подписки
     report_hour: int = _int("REPORT_HOUR", 21)                           # отчёт по спонсорам, час по Москве
     icon_packs: tuple = tuple(x.strip() for x in os.environ.get("ICON_PACKS", "tgiosicons").split(",") if x.strip())

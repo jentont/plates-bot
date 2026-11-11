@@ -20,7 +20,7 @@ from .tg import Telegram, TelegramError
 
 log = logging.getLogger("main")
 
-ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "pre_checkout_query"]
+ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "pre_checkout_query", "my_chat_member"]
 
 
 async def setup_bot(tg: Telegram) -> None:
@@ -33,6 +33,12 @@ async def setup_bot(tg: Telegram) -> None:
         {"command": "top", "description": "Лучшие игроки"},
         {"command": "help", "description": "Как играть"},
     ])
+    try:                                   # в группах — только бросок
+        await tg("setMyCommands", scope={"type": "all_group_chats"}, commands=[
+            {"command": "roll", "description": "Бросить номер (или .ролл)"},
+        ])
+    except TelegramError as e:
+        log.warning("команды для групп: %s", e)
     for admin_id in config.admin_ids:      # админам — ещё и /admin в меню команд
         try:
             await tg("setMyCommands", scope={"type": "chat", "chat_id": admin_id}, commands=[

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS rolls (
 CREATE INDEX IF NOT EXISTS rolls_user ON rolls(user_id, created);
 CREATE TABLE IF NOT EXISTS ai_cache (text TEXT PRIMARY KEY, data TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS chats (id INTEGER PRIMARY KEY, title TEXT NOT NULL, active INTEGER NOT NULL, added REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS sponsors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER, title TEXT NOT NULL, username TEXT, link TEXT NOT NULL DEFAULT '',
@@ -290,6 +291,13 @@ class Storage:
             self.db.execute("UPDATE users SET blocked=1 WHERE id=?", (user_id,))
             self.db.commit()
 
+    def track_chat(self, chat_id: int, title: str, active: bool) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO chats(id, title, active, added) VALUES (?,?,?,?) "
+                            "ON CONFLICT(id) DO UPDATE SET title=excluded.title, active=excluded.active",
+                            (chat_id, title, 1 if active else 0, time.time()))
+            self.db.commit()
+
     def global_stats(self) -> dict:
         day = time.time() - 86400
         one = lambda sql, *a: self.db.execute(sql, a).fetchone()[0]  # noqa: E731
@@ -303,4 +311,6 @@ class Storage:
             "saved": one("SELECT COUNT(*) FROM rolls WHERE saved=1"),
             "inline": one("SELECT COUNT(*) FROM rolls WHERE source='inline'"),
             "mythic": one("SELECT COUNT(*) FROM rolls WHERE score>=80"),
+            "groups": one("SELECT COUNT(*) FROM chats WHERE active=1"),
+            "group_rolls": one("SELECT COUNT(*) FROM rolls WHERE source='group'"),
         }

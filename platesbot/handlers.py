@@ -78,17 +78,26 @@ class Handlers:
         self._inline_busy: set[str] = set()   # инлайн-сообщения, где бросок уже идёт (двойное нажатие)
         self._inline_done: set[str] = set()   # уже брошенные: запоздалое второе нажатие не перебрасывает номер
         self.storage = game.storage
+        from .groups import Groups
+        self.groups = Groups(self)
 
     # ------------------------------------------------------------ dispatch
 
     async def handle(self, upd: dict) -> None:
         try:
             if "message" in upd:
+                if upd["message"]["chat"]["type"] in ("group", "supergroup"):
+                    await self.groups.on_message(upd["message"])
+                    return
                 if self.admin and await self.admin.on_message(upd["message"]):
                     return
                 await self.on_message(upd["message"])
+            elif "my_chat_member" in upd:
+                await self.groups.on_my_chat_member(upd["my_chat_member"])
             elif "callback_query" in upd:
                 if self.admin and await self.admin.on_callback(upd["callback_query"]):
+                    return
+                if await self.groups.on_callback(upd["callback_query"]):
                     return
                 await self.on_callback(upd["callback_query"])
             elif "inline_query" in upd:
@@ -114,7 +123,9 @@ class Handlers:
         cmd = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
         if not await self.gate(user):
             return
-        if cmd == "/start":
+        if cmd == "/start" and text.split()[-1] == "energy":
+            await self.cmd_energy(user)
+        elif cmd == "/start":
             await self.cmd_start(user)
         elif cmd in ("/roll", "/spin"):
             await self.do_roll(user, "chat")
@@ -343,14 +354,20 @@ class Handlers:
             await self.send_energy_invoice(user, pack)
             return
         if data.startswith("save:"):
+            msg = cq.get("message") or {}
+            in_group = (msg.get("chat") or {}).get("type") in ("group", "supergroup")
             status, roll = self.storage.save_roll(int(data[5:]), user["id"])
+            if status == "missing" and in_group:
+                await self.tg("answerCallbackQuery", callback_query_id=cq["id"], show_alert=True,
+                              text="Это чужой номер. Напиши .ролл, чтобы выбить свой")
+                return
             if status == "ok":
                 await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text="Сохранено в гараж")
-                msg = cq.get("message")
                 if msg:
+                    markup = self.groups.card_keyboard(roll) if in_group else roll_keyboard(self.config, self.tg, roll)
                     try:
                         await self.tg("editMessageReplyMarkup", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
-                                      reply_markup=roll_keyboard(self.config, self.tg, roll))
+                                      reply_markup=markup)
                     except TelegramError:
                         pass
             elif status == "full":
