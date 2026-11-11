@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<title>Номера</title>
+<link rel="preload" href="static/fonts/Manrope.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="static/fonts/Barlow-Bold.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="static/styles.css?v=23">
+<script src="https://telegram.org/js/telegram-web-app.js?59"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+</head>
+<body>
+
+<!-- Загрузка -->
+<div class="boot" id="boot">
+  <div class="boot-plate" id="boot-plate"></div>
+  <div class="boot-bar"><i></i></div>
+</div>
+
+<!-- Знакомство: язык и три слайда -->
+<div class="tour" id="tour" hidden>
+  <div class="tour-stage" id="tour-stage"></div>
+  <div class="tour-card">
+    <div class="tour-text" id="tour-text"></div>
+    <div class="tour-foot">
+      <div class="tour-dots" id="tour-dots"></div>
+      <button class="btn btn-primary" id="tour-next" type="button"></button>
+    </div>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <div class="logo" aria-label="Номера">
+      <span class="logo-plate"><b>НОМЕРА</b><i>777</i></span>
+    </div>
+    <button class="energy" id="energy" type="button">
+      <img src="static/img/3d/bolt.png" alt="" width="22" height="22">
+      <b id="energy-val">0</b>
+      <span class="energy-timer" id="energy-timer"></span>
+      <span class="energy-plus" aria-hidden="true"></span>
+    </button>
+  </header>
+
+  <main id="screens">
+
+    <!-- Крутить -->
+    <section class="screen is-active" data-screen="spin">
+      <div class="scene" id="scene">
+        <div class="scene-sky plx" data-depth="-6"></div>
+        <div class="scene-road"><i></i></div>
+        <div class="scene-ghosts plx" data-depth="-14" id="ghosts"></div>
+        <canvas class="scene-fx" id="fx"></canvas>
+        <button class="scene-mode" id="scene-mode" type="button"></button>
+        <div class="rig" id="rig"></div>
+        <div class="scene-caption" id="scene-caption"></div>
+      </div>
+
+      <div class="result" id="result" hidden>
+        <div class="result-head">
+          <span class="tier"><i></i><span id="r-tier"></span></span>
+          <span class="rank" id="r-top"></span>
+        </div>
+        <div class="price" id="r-price"></div>
+        <div class="scale" id="ladder"></div>
+        <ul class="reasons" id="r-reasons"></ul>
+        <div class="result-actions">
+          <button class="btn btn-soft" id="btn-save" type="button"><span class="ico" data-icon="star"></span><span data-i18n>В гараж</span></button>
+          <button class="btn btn-soft" id="btn-share" type="button"><span class="ico" data-icon="share"></span><span data-i18n>В чат</span></button>
+        </div>
+        <button class="btn btn-soft btn-wide" id="btn-ai" type="button" hidden><span class="ico" data-icon="coin"></span><span data-i18n>Оценка нейросети</span></button>
+        <div class="ai-box" id="ai-box" hidden></div>
+      </div>
+
+      <div class="hint" id="spin-hint" data-i18n>Нажми «Крутить» — номер упадёт на дорогу</div>
+
+      <div class="head head-sub" id="recent-head" hidden><h2 data-i18n>Последние броски</h2></div>
+      <div class="recent" id="recent"></div>
+
+
+    </section>
+
+    <!-- Лента -->
+    <section class="screen" data-screen="feed">
+      <div class="head">
+        <h1><span data-i18n>Лента</span><i class="live" aria-hidden="true"></i></h1>
+        <p data-i18n>Каждую секунду выпадает номер из любой страны</p>
+      </div>
+      <div class="figures">
+        <div><b id="feed-count">0</b><span data-i18n>выпало</span></div>
+        <div><b id="feed-rare">0</b><span data-i18n>редких</span></div>
+        <div><b id="feed-best">—</b><span data-i18n>лучший</span></div>
+      </div>
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <!-- Гараж -->
+    <section class="screen" data-screen="garage">
+      <div class="head">
+        <h1 data-i18n>Гараж</h1>
+        <p data-i18n>Несохранённые номера сгорают через 24 часа</p>
+      </div>
+      <div class="figures" id="garage-stats"></div>
+      <div class="garage" id="garage-list"></div>
+      <div class="empty" id="garage-empty" hidden>
+        <img src="static/img/3d/car.png" alt="" width="96" height="96">
+        <p data-i18n>Пока пусто. Крути номера и сохраняй лучшие</p>
+      </div>
+      <div class="head head-sub"><h2 data-i18n>Лучшие игроки</h2></div>
+      <div id="top-list"></div>
+    </section>
+
+    <!-- Страны -->
+    <section class="screen" data-screen="world">
+      <div class="head">
+        <h1 data-i18n>Страны</h1>
+        <p data-i18n>Какие номера будут выпадать</p>
+      </div>
+      <div class="seg" id="mode-seg">
+        <i class="seg-thumb"></i>
+        <button type="button" data-mode="ru" data-i18n>Россия</button>
+        <button type="button" data-mode="world" data-i18n>Весь мир</button>
+        <button type="button" data-mode="custom" data-i18n>Свой набор</button>
+      </div>
+      <div class="globe-grid" id="country-grid"></div>
+
+      <div class="head head-sub">
+        <h2 data-i18n>Оценить свой номер</h2>
+        <p data-i18n>Российский формат, например А777АА 777</p>
+      </div>
+      <form class="estimate" id="estimate-form">
+        <input id="estimate-input" type="text" autocomplete="off" placeholder="А777АА 777" maxlength="12">
+        <button class="btn btn-primary" type="submit" data-i18n>Оценить</button>
+      </form>
+      <div id="estimate-result"></div>
+
+      <div class="rows">
+        <button class="row" id="row-lang" type="button"><span data-i18n>Язык</span><b id="row-lang-val"></b></button>
+        <button class="row" id="row-tour" type="button"><span data-i18n>Показать обучение</span><b></b></button>
+      </div>
+    </section>
+  </main>
+
+  <div class="dock">
+    <button class="btn btn-primary btn-spin" id="btn-spin" type="button">
+      <span id="btn-spin-label" data-i18n>Крутить</span>
+      <span class="cost"><img src="static/img/3d/bolt.png" alt="" width="16" height="16">1</span>
+    </button>
+    <nav class="tabbar" id="tabs">
+      <i class="tab-thumb"></i>
+      <button type="button" data-tab="spin" class="is-on"><span class="ico" data-icon="spin"></span><span data-i18n>Крутить</span></button>
+      <button type="button" data-tab="feed"><span class="ico" data-icon="feed"></span><span data-i18n>Лента</span></button>
+      <button type="button" data-tab="garage"><span class="ico" data-icon="garage"></span><span data-i18n>Гараж</span></button>
+      <button type="button" data-tab="world"><span class="ico" data-icon="world"></span><span data-i18n>Страны</span></button>
+    </nav>
+  </div>
+
+  <!-- Шторка: энергия / язык -->
+  <div class="sheet-back" id="sheet-back" hidden></div>
+  <div class="sheet" id="sheet" hidden></div>
+
+  <div class="toast" id="toast" hidden></div>
+</div>
+<script src="static/i18n.js?v=23"></script>
+<script src="static/app.js?v=23"></script>
+</body>
+</html>
