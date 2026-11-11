@@ -66,7 +66,8 @@ class Config:
     host: str = os.environ.get("HOST", "0.0.0.0")
     port: int = _int("PORT", 8080)
     dev_mode: bool = os.environ.get("DEV_MODE", "0") == "1" or "--dev" in sys.argv   # мини-апа без initData
-    db_path: Path = ROOT / os.environ.get("DB_PATH", "data/plates.db")
+    # DATA_DIR — постоянная папка хостинга: без неё база внутри контейнера стирается при каждом обновлении
+    db_path: Path = (Path(os.environ["DATA_DIR"]) / "plates.db") if os.environ.get("DATA_DIR") else ROOT / os.environ.get("DB_PATH", "data/plates.db")
     energy_max: int = _int("ENERGY_MAX", 30)
     energy_regen_sec: int = _int("ENERGY_REGEN_SEC", 90)
     garage_free_slots: int = _int("GARAGE_FREE_SLOTS", 5)

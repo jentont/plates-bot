@@ -4,7 +4,7 @@ services:
     container_name: plates-bot
     env_file: .env
     ports:
-      - "8080:8080"
+      - "8080:3000"
     volumes:
       - plates-data:/app/data
     restart: unless-stopped

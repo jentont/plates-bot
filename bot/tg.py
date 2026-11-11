@@ -1,6 +1,6 @@
 """Тонкий клиент Bot API поверх aiohttp.
 
-Написан сам, а не через aiogram, потому что нужны методы Bot API 10.4
+Написан сам, без сторонних библиотек, потому что нужны методы Bot API 10.4
 (sendWidget, answerWidgetQuery, editMessageWidgetData), которых в библиотеках
 ещё нет. Любой метод вызывается как `await tg("methodName", param=value)`.
 """
