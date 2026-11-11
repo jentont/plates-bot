@@ -18,7 +18,7 @@ from core.rarity import Evaluation
 
 from .config import Config
 from .game import Game, NoEnergy
-from .render import render_card, render_cover
+from .render import render_card, render_cover, in_thread
 
 log = logging.getLogger("api")
 WEBAPP_DIR = Path(__file__).resolve().parent.parent / "webapp"
@@ -292,7 +292,8 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         roll = storage.get_roll(int(request.match_info["roll_id"]))
         if not roll:
             raise web.HTTPNotFound()
-        png = _card_png(roll["id"], json.dumps(roll["plate"], sort_keys=True), json.dumps(roll["eval"], sort_keys=True))
+        png = await in_thread(_card_png, roll["id"], json.dumps(roll["plate"], sort_keys=True),
+                                      json.dumps(roll["eval"], sort_keys=True))
         return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
     @lru_cache(maxsize=256)
@@ -308,7 +309,7 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
     async def cover(request):
         kind = request.match_info["kind"]
         title = {"ru": "Бросок российского номера", "world": "Бросок номера мира"}.get(kind, "Бросок номера")
-        return web.Response(body=_cover_png(title), content_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+        return web.Response(body=await in_thread(_cover_png, title), content_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
     @lru_cache(maxsize=4)
     def _cover_png(title: str) -> bytes:

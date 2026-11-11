@@ -10,6 +10,8 @@ import random
 from functools import lru_cache
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from core.plates import Plate
@@ -399,3 +401,13 @@ def render_cover(bot_name: str, subtitle: str) -> bytes:
     tag = f"@{bot_name}"
     d.text((W - 60 - _tw(d, tag, font("text", 23)), H - 70), tag, font=font("text", 23), fill=MUTED)
     return _png(img)
+
+
+# Рисование — в одном отдельном потоке: так основной цикл (мини-апа, лента, бот) не ждёт картинок,
+# а несколько одновременных карточек не отбирают процессор друг у друга и у него.
+_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="render")
+
+
+async def in_thread(fn, *args):
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(_POOL, fn, *args)

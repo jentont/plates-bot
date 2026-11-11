@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from .render import render_card, render_cover
+from .render import render_card, render_cover, in_thread
 from .tg import TelegramError
 
 log = logging.getLogger("cards")
@@ -58,8 +58,8 @@ class CardStore:
         if roll["id"] in self._ids:
             return self._ids[roll["id"]]
         plate, ev = self.game.roll_objects(roll)
-        png = render_card(plate, ev, "Номер выпал", user_name, self.tg.me.get("username", "bot"),
-                          self.game.country_name(plate.country))
+        png = await in_thread(render_card, plate, ev, "Номер выпал", user_name,
+                                      self.tg.me.get("username", "bot"), self.game.country_name(plate.country))
         file_id = await self.upload(png, f"#{roll['id']} {plate.text}")
         if file_id:
             if len(self._ids) > 5000:
@@ -77,7 +77,8 @@ class CardStore:
         if cached:
             return cached
         title = {"ru": "Бросок российского номера", "world": "Бросок номера мира"}.get(kind, "Бросок номера")
-        file_id = await self.upload(render_cover(self.tg.me.get("username", "bot"), title), f"cover {kind}")
+        png = await in_thread(render_cover, self.tg.me.get("username", "bot"), title)
+        file_id = await self.upload(png, f"cover {kind}")
         if file_id:
             self.storage.set_setting(key, file_id)
         return file_id

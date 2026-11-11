@@ -18,7 +18,7 @@ import time
 from core.rarity import format_price
 
 from .game import NoEnergy
-from .render import render_card
+from .render import render_card, in_thread
 from .tg import TelegramError, btn, esc, kb
 
 log = logging.getLogger("groups")
@@ -123,8 +123,8 @@ class Groups:
                           reply_markup=kb([[btn("⚡ Пополнить энергию", url=self.bot_link("energy"))]]))
             return
         plate, ev = self.game.roll_objects(roll)
-        png = render_card(plate, ev, "Номер выпал", user.get("first_name") or "Игрок", self.tg.me.get("username", "bot"),
-                          self.game.country_name(plate.country))
+        png = await in_thread(render_card, plate, ev, "Номер выпал", user.get("first_name") or "Игрок",
+                                      self.tg.me.get("username", "bot"), self.game.country_name(plate.country))
         where = self.game.country_name(plate.country) + (f", {plate.region_name}" if plate.region_name else "")
         caption = (f"⚡ {mention(user)} выбил номер <b>{esc(plate.text)}</b>\n"
                    f"🌟 {esc(where)}\n"

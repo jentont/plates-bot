@@ -346,13 +346,32 @@ def evaluate(plate: Plate) -> Evaluation:
 # ---------------------------------------------------------------- Распределение
 
 _DIST: dict[str, list[int]] = {}
+DIST_FILE = __import__("pathlib").Path(__file__).with_name("distribution.json")
+SAMPLES = 20000
+
+
+def build_distribution(country: str) -> list[int]:
+    rng = random.Random(1309)
+    return sorted(evaluate_score_only(generate(country, rng)) for _ in range(SAMPLES))
+
+
+def _load_file() -> None:
+    """Распределения считаются заранее (tools/make_distribution.py) — на слабом сервере
+    генерация 20 000 номеров на страну занимала секунды и подвешивала всех игроков."""
+    import json
+    try:
+        data = json.loads(DIST_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    for country, pairs in data.items():       # [[очки, сколько раз], ...] → отсортированный список
+        _DIST[country] = [score for score, count in pairs for _ in range(count)]
 
 
 def _distribution(country: str) -> list[int]:
+    if not _DIST:
+        _load_file()
     if country not in _DIST:
-        rng = random.Random(1309)
-        samples = sorted(evaluate_score_only(generate(country, rng)) for _ in range(20000))
-        _DIST[country] = samples
+        _DIST[country] = build_distribution(country)
     return _DIST[country]
 
 

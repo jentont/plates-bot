@@ -8,7 +8,7 @@ from core.rarity import format_price
 
 from .config import Config
 from .game import Game, NoEnergy
-from .render import render_card
+from .render import render_card, in_thread
 from .tg import Telegram, TelegramError, btn, esc, kb
 
 log = logging.getLogger("handlers")
@@ -77,8 +77,8 @@ def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
 
 async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, roll: dict, chat_id: int | None = None) -> dict:
     plate, ev = game.roll_objects(roll)
-    png = render_card(plate, ev, "Номер выпал", user.get("first_name") or "Игрок", tg.me.get("username", "bot"),
-                      game.country_name(plate.country))
+    png = await in_thread(render_card, plate, ev, "Номер выпал", user.get("first_name") or "Игрок",
+                                  tg.me.get("username", "bot"), game.country_name(plate.country))
     return await tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat_id or user["id"],
                     caption=roll_caption(game, roll), parse_mode="HTML", reply_markup=roll_keyboard(config, tg, roll))
 
