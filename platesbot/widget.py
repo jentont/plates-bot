@@ -16,11 +16,12 @@ WIDGET_HEIGHT = 330
 
 HTML = r"""<style>
 *{box-sizing:border-box;margin:0;padding:0}
-#r{font-family:system-ui,sans-serif;background:#0e131c;color:#eef1f6;border-radius:18px;padding:16px;height:100%;position:relative;overflow:hidden}
+html,body{margin:0;background:#0A0A0C}
+#r{font-family:system-ui,sans-serif;background:#0A0A0C;color:#F2F3F5;border-radius:18px;padding:16px;height:330px;position:relative;overflow:hidden}
 #glow{position:absolute;left:10%;right:10%;top:40px;height:160px;border-radius:50%;background:var(--g,transparent);opacity:.35;filter:blur(40px);transition:background .5s}
-.hd{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#8e97a8;font-weight:600;position:relative}
-.hd b{color:#eef1f6;font-size:15px}
-.en{color:#ffb020}
+.hd{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:#8B8F98;font-weight:600;position:relative}
+.hd b{color:#F2F3F5;font-size:15px}
+.en{color:#F2F3F5}
 .pl{position:relative;margin:18px auto 0;width:100%;max-width:360px;height:78px;display:flex;background:#f4f4f0;color:#141414;border:3px solid #0f0f0f;border-radius:9px;font-family:ui-sans-serif,system-ui,sans-serif;font-weight:800;overflow:hidden;box-shadow:0 10px 24px -10px #000}
 .pl.lit{box-shadow:0 10px 24px -10px #000,0 0 36px -4px var(--g,transparent)}
 .mn{flex:1;display:flex;align-items:center;justify-content:center;gap:2px;font-size:42px;line-height:1;padding:0 6px}
@@ -35,14 +36,14 @@ HTML = r"""<style>
 .rg small{font-size:9px;letter-spacing:.08em;display:flex;align-items:center;gap:4px}
 .fl{display:inline-block;width:14px;height:9px;border:1px solid #0003;background:linear-gradient(#fff 33%,#0039a6 33% 66%,#d52b1e 66%)}
 .st{position:relative;margin-top:14px;display:flex;justify-content:space-between;align-items:flex-end;min-height:48px}
-.tier{display:inline-block;font-size:12px;font-weight:700;padding:5px 10px;border-radius:99px;background:#1b2434;color:var(--g,#8e97a8)}
+.tier{display:inline-block;font-size:12px;font-weight:700;padding:5px 10px;border-radius:99px;background:#1E1F24;color:var(--g,#8B8F98)}
 .pr{font-size:24px;font-weight:800;margin-top:6px;letter-spacing:-.02em}
-.sub{color:#8e97a8;font-size:12px;text-align:right;max-width:46%}
+.sub{color:#8B8F98;font-size:12px;text-align:right;max-width:46%}
 .bt{display:flex;gap:8px;margin-top:14px;position:relative}
-button{flex:1;height:46px;border:0;border-radius:13px;font:700 15px system-ui,sans-serif;background:#ffb020;color:#1a1200}
-button.g{background:#1b2434;color:#eef1f6;flex:0 0 46%}
+button{flex:1;height:46px;border:0;border-radius:13px;font:700 15px system-ui,sans-serif;background:#F2F3F5;color:#0B0C0F}
+button.g{background:#1E1F24;color:#F2F3F5;flex:0 0 46%}
 button:disabled{opacity:.6}
-#msg{position:absolute;left:16px;right:16px;bottom:72px;text-align:center;font-size:12px;color:#ffb020}
+#msg{position:absolute;left:16px;right:16px;bottom:72px;text-align:center;font-size:12px;color:#8B8F98}
 </style>
 <div id="r"><div id="glow"></div>
 <div class="hd"><b>Номера</b><span id="en" class="en"></span></div>

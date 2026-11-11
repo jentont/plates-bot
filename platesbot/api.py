@@ -293,7 +293,7 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None) -> web.
             from .widget import chat_data
             plate = generate("RU")
             ev = evaluate(plate)
-            cd = chat_data({"plate": plate.to_dict(), "eval": ev.to_dict()}, {"current": 7, "max": 10}, "Россия")
+            cd = chat_data({"plate": plate.to_dict(), "eval": ev.to_dict()}, {"current": 30, "max": 30}, "Россия")
             mock = """<script>
             var TelegramWidget={chatData:%s,publicData:'{"a":"https://t.me"}',isPreview:false,
               request:function(d){return fetch('/dev/widget_roll').then(function(r){return r.text()}).then(function(t){return {result:t}})},
@@ -302,7 +302,7 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None) -> web.
             </script>""" % json.dumps(cd, ensure_ascii=False)
             page = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
                     "<body style='margin:0;background:#1f2a3a;padding:24px;display:flex;justify-content:center'>"
-                    f"<div style='width:360px;height:{330}px'>{mock}{widget_html()}</div></body>")
+                    f"<div style='width:360px'>{mock}{widget_html()}</div></body>")   # без высоты обёртки, как в Telegram
             return web.Response(text=page, content_type="text/html")
 
         @routes.get("/dev/widget_roll")
