@@ -69,6 +69,11 @@ async def setup_bot(tg: Telegram) -> None:
 async def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     storage = Storage(config.db_path, config.energy_max, config.energy_regen_sec, config.garage_free_slots, config.roll_ttl_sec)
+    _st = storage.global_stats()
+    _size = config.db_path.stat().st_size // 1024 if config.db_path.exists() else 0
+    # По этой строке после передеплоя видно, та ли это база: если игроков вдруг 0 — данные не сохранились
+    log.info("База: %s, %s КБ — игроков %s, бросков %s, в гаражах %s",
+             config.db_path, _size, _st["users"], _st["rolls"], _st["saved"])
     storage.purge()
     game = Game(storage, config)
     feed = Feed(game, config.feed_interval)

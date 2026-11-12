@@ -78,6 +78,35 @@ def _sell_prices() -> dict:
     return prices
 
 
+PERSISTENT_DIRS = ("/data", "/var/data", "/persistent")
+
+
+def _writable(d: Path) -> bool:
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        probe = d / ".write_test"
+        probe.write_text("ok")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _db_path() -> Path:
+    """Где лежит база. DATA_DIR → DB_PATH → постоянные папки хостинга (/data и т.п.) → data/ рядом с кодом.
+
+    Папку с кодом хостинг перезаписывает при каждом передеплое, и база в ней пропадает.
+    """
+    if os.environ.get("DATA_DIR"):
+        return Path(os.environ["DATA_DIR"]) / "plates.db"
+    if os.environ.get("DB_PATH"):
+        return ROOT / os.environ["DB_PATH"]
+    for d in PERSISTENT_DIRS:
+        if Path(d).is_dir() and _writable(Path(d)):
+            return Path(d) / "plates.db"
+    return ROOT / "data" / "plates.db"
+
+
 def _ids(raw: str) -> tuple[int, ...]:
     return tuple(int(x) for x in raw.replace(";", ",").split(",") if x.strip().lstrip("-").isdigit())
 
@@ -90,7 +119,7 @@ class Config:
     port: int = _int("PORT", 8080)
     dev_mode: bool = os.environ.get("DEV_MODE", "0") == "1" or "--dev" in sys.argv   # мини-апа без initData
     # DATA_DIR — постоянная папка хостинга: без неё база внутри контейнера стирается при каждом обновлении
-    db_path: Path = (Path(os.environ["DATA_DIR"]) / "plates.db") if os.environ.get("DATA_DIR") else ROOT / os.environ.get("DB_PATH", "data/plates.db")
+    db_path: Path = field(default_factory=lambda: _db_path())
     energy_max: int = _int("ENERGY_MAX", 30)
     energy_regen_sec: int = _int("ENERGY_REGEN_SEC", 90)
     garage_free_slots: int = _int("GARAGE_FREE_SLOTS", 5)
