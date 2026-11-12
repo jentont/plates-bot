@@ -127,6 +127,8 @@ class Config:
     roll_ttl_sec: int = _int("ROLL_TTL_SEC", 86400)
     feed_interval: float = float(os.environ.get("FEED_INTERVAL", "1.0"))
     admin_ids: tuple = _ids(os.environ.get("ADMIN_IDS", ""))                # кто видит /admin
+    backup_chat: str = os.environ.get("BACKUP_CHAT", "").strip()           # куда слать бэкап базы (иначе личка админа)
+    backup_every: int = _int("BACKUP_EVERY", 900)                       # как часто, сек (только если база менялась)
     storage_chat: str = os.environ.get("STORAGE_CHAT", "").strip()         # склад картинок (id канала/группы)
     group_nudge_every: int = _int("GROUP_NUDGE_EVERY", 100)              # напоминание «.ролл» в группах, 0 — выкл
     sell_prices: dict = field(default_factory=_sell_prices)              # выкуп номеров за прокруты

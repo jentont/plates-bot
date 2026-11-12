@@ -32,7 +32,7 @@ def panel_kb() -> dict:
         [B("📢 Спонсоры", "a:sp")],
         [B("📊 Статистика", "a:stats"), B("📨 Рассылка", "a:post")],
         [B("✨ Премиум-эмодзи", "a:pack"), B("🖼 Баннер меню", "a:ban")],
-        [B("🗄 Склад картинок", "a:store")],
+        [B("🗄 Склад картинок", "a:store"), B("📥 Бэкап базы", "a:bk")],
     ])
 
 
@@ -41,6 +41,7 @@ class Admin:
         self.tg, self.storage, self.sponsors, self.config = tg, storage, sponsors, config
         self.state: dict[int, tuple[str, dict]] = {}
         self.cards = None          # CardStore, подключается в main после создания обработчиков
+        self.backup = None         # Backup, подключается в main
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.config.admin_ids
@@ -169,6 +170,22 @@ class Admin:
                 "С ним инлайн-броски грузятся быстрее и не зависят от того, видит ли Telegram наш сервер.\n\n"
                 "Сделай бота админом канала и пришли сюда любой пост оттуда (переслать) или id канала (-100…)."),
                 kb(([[B("❌ Отключить склад", "a:store0")]] if chat else []) + [BACK]))
+        elif action in ("bk", "bk!"):
+            if not self.backup:
+                await self.edit(msg, "Бэкап не запущен.", kb([BACK]))
+                return True
+            if action == "bk!":
+                await self.edit(msg, "📥 Делаю бэкап…", None)
+                await self.backup.run_once(force=True)
+            from .backup import target
+            where = target(self.config)
+            await self.edit(msg, (
+                "📥 <b>Бэкап базы</b>\n\n"
+                f"Куда: <code>{where}</code>{' (личка админа)' if not self.config.backup_chat else ''}\n"
+                f"Статус: {html.escape(self.backup.status)}\n\n"
+                f"Бот сам сохраняет копию раз в {self.config.backup_every // 60} мин, если в базе что-то поменялось, "
+                "и закрепляет её. Если после передеплоя база пустая, бот при запуске восстановится из закреплённой копии."),
+                kb([[B("📥 Сделать сейчас", "a:bk!")], BACK]))
         elif action == "store0":
             self.state.pop(uid, None)
             self.storage.set_setting("storage_chat", "0")

@@ -69,6 +69,11 @@ async def setup_bot(tg: Telegram) -> None:
 
 async def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    from . import backup
+    try:
+        log.info("Бэкап: %s", await backup.restore_if_empty(config))
+    except Exception:  # noqa: BLE001 — без бэкапа бот всё равно должен подняться
+        log.exception("восстановление из бэкапа не удалось")
     storage = Storage(config.db_path, config.energy_max, config.energy_regen_sec, config.garage_free_slots, config.roll_ttl_sec)
     _st = storage.global_stats()
     _size = config.db_path.stat().st_size // 1024 if config.db_path.exists() else 0
@@ -108,6 +113,9 @@ async def run() -> None:
             handlers = Handlers(tg, game, config, sponsors=sponsors, admin=admin)
             admin.cards = handlers.cards
             tasks.append(asyncio.create_task(sponsors.report_loop()))
+            saver = backup.Backup(tg, storage, config)
+            admin.backup = saver
+            tasks.append(asyncio.create_task(saver.loop()))
 
             async def polling():
                 async for upd in tg.poll(ALLOWED_UPDATES):
