@@ -58,8 +58,10 @@ class CardStore:
         if roll["id"] in self._ids:
             return self._ids[roll["id"]]
         plate, ev = self.game.roll_objects(roll)
+        from core.cars import BY_ID
         png = await in_thread(render_card, plate, ev, "Номер выпал", user_name,
-                                      self.tg.me.get("username", "bot"), self.game.country_name(plate.country))
+                              self.tg.me.get("username", "bot"), self.game.country_name(plate.country), "",
+                              BY_ID.get(self.storage.car_of(roll["user_id"]) or ""))
         file_id = await self.upload(png, f"#{roll['id']} {plate.text}")
         if file_id:
             if len(self._ids) > 5000:

@@ -30,6 +30,7 @@ async def setup_bot(tg: Telegram) -> None:
         {"command": "roll", "description": "Бросить номер"},
         {"command": "energy", "description": "Энергия и покупка за Stars"},
         {"command": "garage", "description": "Мой гараж"},
+        {"command": "cars", "description": "Автосалон и мои машины"},
         {"command": "top", "description": "Лучшие игроки"},
         {"command": "help", "description": "Как играть"},
     ])

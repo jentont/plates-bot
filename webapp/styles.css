@@ -272,6 +272,29 @@ h2 { font: 800 18px/1.2 var(--font); letter-spacing: -.02em; }
 .garage-acts button.is-danger { color: var(--bad); }
 .garage-acts button:active { background: var(--soft); }
 .btn-sell img { flex: none; }
+/* гараж: машина игрока. Фото слегка наклоняется вместе с телефоном */
+.showroom { position: relative; margin-bottom: 12px; border-radius: 26px; overflow: hidden; background: #050506; perspective: 900px; isolation: isolate; }
+.showroom-photo { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 50% 60%; transform: scale(1.12) translate3d(calc(var(--px) * -10px), calc(var(--py) * -6px), 0); will-change: transform; }
+.showroom::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5, 5, 6, .55) 0%, transparent 28%, transparent 46%, rgba(5, 5, 6, .92) 100%); pointer-events: none; }
+.showroom-top { position: absolute; z-index: 2; left: 14px; right: 14px; top: 12px; display: flex; justify-content: space-between; align-items: center; }
+.showroom-name { font-weight: 800; font-size: 15px; }
+.wallet { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 7px; border-radius: 16px; background: rgba(0, 0, 0, .55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }
+.wallet img { width: 20px; height: 20px; }
+.showroom-plate { position: absolute; z-index: 2; left: 50%; bottom: 14px; width: min(62%, 250px); transform: translateX(-50%) rotateX(calc(var(--py) * -8deg)) rotateY(calc(var(--px) * 12deg)); }
+.showroom.is-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 54px 20px 22px; text-align: center; background: var(--card); border: 1px solid var(--line); }
+.showroom.is-empty::after { display: none; }
+.showroom.is-empty p { color: var(--hint); font-size: 14px; font-weight: 500; }
+.shop { display: flex; flex-direction: column; gap: 8px; }
+.car { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); }
+.car img { flex: none; width: 104px; height: 70px; border-radius: 12px; object-fit: cover; object-position: 50% 60%; }
+.car.is-locked img { filter: grayscale(1) brightness(.6); }
+.car-info { flex: 1; min-width: 0; }
+.car-info b { display: block; font-size: 14.5px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.car-info small { color: var(--hint); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.car button { flex: none; height: 38px; padding: 0 14px; margin-right: 4px; border-radius: 12px; font-weight: 800; font-size: 13px; background: var(--card-2); color: var(--text); }
+.car button.is-buy { background: var(--brand); color: var(--on-brand); }
+.car button:disabled { opacity: .5; }
+.car .is-current { color: #4CD38A; font-weight: 800; font-size: 13px; margin-right: 12px; }
 .slot-free { display: block; width: 100%; aspect-ratio: 4.64 / 1; border-radius: 2.4cqw; border: 1.5px dashed rgba(255, 255, 255, .16); }
 .podium { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 8px; }
 .pod { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; animation: rise .5s var(--ease) both; }

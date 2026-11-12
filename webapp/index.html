@@ -7,7 +7,7 @@
 <title>Номера</title>
 <link rel="preload" href="static/fonts/Manrope.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="preload" href="static/fonts/Barlow-Bold.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="stylesheet" href="static/styles.css?v=26">
+<link rel="stylesheet" href="static/styles.css?v=27">
 <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
@@ -71,7 +71,8 @@
           <button class="btn btn-soft" id="btn-save" type="button"><span class="ico" data-icon="star"></span><span data-i18n>В гараж</span></button>
           <button class="btn btn-soft" id="btn-share" type="button"><span class="ico" data-icon="share"></span><span data-i18n>В чат</span></button>
         </div>
-        <button class="btn btn-soft btn-wide btn-sell" id="btn-sell" type="button" hidden><img src="static/img/3d/money.png" alt="" width="22" height="22"><span id="btn-sell-label"></span></button>
+        <button class="btn btn-soft btn-wide btn-sell" id="btn-sell" type="button" hidden><img src="static/img/3d/bolt.png" alt="" width="22" height="22"><span id="btn-sell-label"></span></button>
+        <button class="btn btn-soft btn-wide btn-sell" id="btn-sellm" type="button" hidden><img src="static/img/3d/money.png" alt="" width="22" height="22"><span id="btn-sellm-label"></span></button>
         <button class="btn btn-soft btn-wide" id="btn-ai" type="button" hidden><span class="ico" data-icon="coin"></span><span data-i18n>Оценка нейросети</span></button>
         <div class="ai-box" id="ai-box" hidden></div>
       </div>
@@ -104,8 +105,11 @@
         <h1 data-i18n>Гараж</h1>
         <p data-i18n>Несохранённые номера сгорают через 24 часа</p>
       </div>
+      <div class="showroom" id="showroom"></div>
       <div class="figures" id="garage-stats"></div>
       <div class="garage" id="garage-list"></div>
+      <div class="head head-sub"><h2 data-i18n>Автосалон</h2><p data-i18n>Продавай номера за деньги и покупай машины. Твоя машина появится на карточках номеров</p></div>
+      <div class="shop" id="car-shop"></div>
       <div class="empty" id="garage-empty" hidden>
         <img src="static/img/3d/car.png" alt="" width="96" height="96">
         <p data-i18n>Пока пусто. Крути номера и сохраняй лучшие</p>
@@ -165,7 +169,7 @@
 
   <div class="toast" id="toast" hidden></div>
 </div>
-<script src="static/i18n.js?v=26"></script>
-<script src="static/app.js?v=26"></script>
+<script src="static/i18n.js?v=27"></script>
+<script src="static/app.js?v=27"></script>
 </body>
 </html>

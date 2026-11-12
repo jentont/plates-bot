@@ -138,6 +138,15 @@ class Config:
         if not roll.get("saved") and not roll.get("forever") and roll.get("expires", 0) < time.time():
             return 0
         return int(self.sell_prices.get(roll["eval"]["tier"], 0))
+
+    def money_price(self, roll: dict) -> int:
+        """Сколько рублей дадут за номер. 0 — уже продан или сгорел."""
+        if roll.get("sold"):
+            return 0
+        if not roll.get("saved") and not roll.get("forever") and roll.get("expires", 0) < time.time():
+            return 0
+        from core.cars import plate_money
+        return plate_money(roll)
     subscribe_ttl: int = _int("SUBSCRIBE_TTL", 600)                      # сколько верим проверке подписки
     report_hour: int = _int("REPORT_HOUR", 21)                           # отчёт по спонсорам, час по Москве
     icon_packs: tuple = tuple(x.strip() for x in os.environ.get("ICON_PACKS", "tgiosicons").split(",") if x.strip())

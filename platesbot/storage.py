@@ -58,7 +58,18 @@ class Storage:
         if "blocked" not in cols:     # старые базы: отметка «заблокировал бота» для рассылки и статистики
             self.db.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
+        if "money" not in cols:       # деньги с продажи номеров и активная машина
+            self.db.execute("ALTER TABLE users ADD COLUMN money INTEGER NOT NULL DEFAULT 0")
+            self.db.execute("ALTER TABLE users ADD COLUMN car TEXT NOT NULL DEFAULT ''")
+            self.db.commit()
+        self.db.execute("CREATE TABLE IF NOT EXISTS user_cars (user_id INTEGER NOT NULL, car_id TEXT NOT NULL, "
+                        "bought REAL NOT NULL, PRIMARY KEY (user_id, car_id))")
+        rcols = {r["name"] for r in self.db.execute("PRAGMA table_info(rolls)")}
+        if "sold" in rcols and "sold_money" not in rcols:
+            self.db.execute("ALTER TABLE rolls ADD COLUMN sold_money INTEGER NOT NULL DEFAULT 0")
+            self.db.commit()
         if "sold" not in {r["name"] for r in self.db.execute("PRAGMA table_info(rolls)")}:   # выкуп за прокруты
+            self.db.execute("ALTER TABLE rolls ADD COLUMN sold_money INTEGER NOT NULL DEFAULT 0")
             self.db.execute("ALTER TABLE rolls ADD COLUMN sold INTEGER NOT NULL DEFAULT 0")
             self.db.execute("ALTER TABLE rolls ADD COLUMN sold_for INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
@@ -197,7 +208,7 @@ class Storage:
             self.db.commit()
             return "ok", self.get_roll(roll_id)
 
-    def sell_roll(self, roll_id: int, user_id: int, price_of) -> tuple[str, dict | None, int]:
+    def sell_roll(self, roll_id: int, user_id: int, price_of, money: bool = False) -> tuple[str, dict | None, int]:
         """Продать номер боту. Возвращает ('ok'|'missing'|'sold'|'expired'|'cheap', roll, сколько прокрутов дали).
 
         Одна транзакция: «sold=0» в условии UPDATE не даёт продать номер дважды при двойном нажатии.
@@ -214,12 +225,50 @@ class Storage:
             gain = price_of(roll)
             if gain <= 0:
                 return "cheap", roll, 0
-            cur = self.db.execute("UPDATE rolls SET sold=1, sold_for=?, saved=0 WHERE id=? AND sold=0", (gain, roll_id))
+            cur = self.db.execute("UPDATE rolls SET sold=1, sold_for=?, sold_money=?, saved=0 WHERE id=? AND sold=0",
+                                  (0 if money else gain, gain if money else 0, roll_id))
             if not cur.rowcount:
                 return "sold", roll, 0
+            if money:
+                self.db.execute("UPDATE users SET money=money+? WHERE id=?", (gain, user_id))
             self.db.commit()
-        self.add_energy(user_id, gain)
+        if not money:
+            self.add_energy(user_id, gain)
         return "ok", self.get_roll(roll_id), gain
+
+    # ------------------------------------------------------------ деньги и машины
+
+    def wallet(self, user_id: int) -> dict:
+        row = self.db.execute("SELECT money, car FROM users WHERE id=?", (user_id,)).fetchone()
+        owned = [r[0] for r in self.db.execute("SELECT car_id FROM user_cars WHERE user_id=? ORDER BY bought", (user_id,))]
+        return {"money": row["money"] if row else 0, "car": (row["car"] if row else "") or None, "owned": owned}
+
+    def car_of(self, user_id: int) -> str | None:
+        row = self.db.execute("SELECT car FROM users WHERE id=?", (user_id,)).fetchone()
+        return (row["car"] or None) if row else None
+
+    def buy_car(self, user_id: int, car_id: str, price: int) -> str:
+        """'ok' | 'owned' | 'poor'. Купленная машина сразу становится активной."""
+        with self.lock:
+            if self.db.execute("SELECT 1 FROM user_cars WHERE user_id=? AND car_id=?", (user_id, car_id)).fetchone():
+                return "owned"
+            cur = self.db.execute("UPDATE users SET money=money-?, car=? WHERE id=? AND money>=?",
+                                  (price, car_id, user_id, price))
+            if not cur.rowcount:
+                return "poor"
+            self.db.execute("INSERT INTO user_cars(user_id, car_id, bought) VALUES (?,?,?)", (user_id, car_id, time.time()))
+            self.db.commit()
+            return "ok"
+
+    def use_car(self, user_id: int, car_id: str) -> bool:
+        """Сесть в купленную машину. Пустой car_id — ходить пешком."""
+        with self.lock:
+            if car_id and not self.db.execute("SELECT 1 FROM user_cars WHERE user_id=? AND car_id=?",
+                                              (user_id, car_id)).fetchone():
+                return False
+            self.db.execute("UPDATE users SET car=? WHERE id=?", (car_id, user_id))
+            self.db.commit()
+            return True
 
     def drop_from_garage(self, roll_id: int, user_id: int) -> dict | None:
         """Убрать номер из гаража насовсем: место освобождается, вернуть нельзя."""
@@ -353,5 +402,7 @@ class Storage:
             "groups": one("SELECT COUNT(*) FROM chats WHERE active=1"),
             "sold": one("SELECT COUNT(*) FROM rolls WHERE sold=1"),
             "sold_for": one("SELECT COALESCE(SUM(sold_for), 0) FROM rolls WHERE sold=1"),
+            "sold_money": one("SELECT COALESCE(SUM(sold_money), 0) FROM rolls WHERE sold=1"),
+            "cars": one("SELECT COUNT(*) FROM user_cars"),
             "group_rolls": one("SELECT COUNT(*) FROM rolls WHERE source='group'"),
         }

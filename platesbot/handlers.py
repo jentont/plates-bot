@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from core.cars import BY_ID, CARS, fmt_money
 from core.rarity import format_price
 
 from .config import Config
@@ -52,22 +53,25 @@ def roll_caption(game: Game, roll: dict) -> str:
             f"<i>{esc(reasons)}</i>")
 
 
-def sell_button(config: Config, roll: dict) -> dict | None:
-    price = config.sell_price(roll)
-    return btn(f"💰 Продать за {price} ⚡", f"sell:{roll['id']}") if price else None
+def sell_buttons(config: Config, roll: dict, short: bool = False) -> list[dict]:
+    """Кнопки продажи: за прокруты (если бот выкупает) и за деньги (всегда, пока номер не продан)."""
+    out = []
+    price, money = config.sell_price(roll), config.money_price(roll)
+    if price:
+        out.append(btn(f"⚡ За {price} прокрутов" if not short else f"⚡ {price}", f"sell:{roll['id']}"))
+    if money:
+        out.append(btn(f"💰 За {fmt_money(money)}" if not short else f"💰 {fmt_money(money)}", f"sellm:{roll['id']}"))
+    return out
 
 
 def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
     rows = []
-    if roll.get("sold"):
-        pass
-    elif not roll["saved"]:
-        sb = sell_button(config, roll)
-        rows.append([btn("⭐ Сохранить в гараж", f"save:{roll['id']}", style="primary")] + ([sb] if sb else []))
-    else:
-        sb = sell_button(config, roll)
+    if not roll.get("sold"):
+        if not roll["saved"]:
+            rows.append([btn("⭐ Сохранить в гараж", f"save:{roll['id']}", style="primary")])
+        sb = sell_buttons(config, roll)
         if sb:
-            rows.append([sb])
+            rows.append(sb)
     rows.append([btn("⚡ Крутить ещё", "roll"), btn("📤 Поделиться", switch_inline_query=f"{roll['id']}")])
     ab = app_button(config, tg)
     if ab:
@@ -78,7 +82,8 @@ def roll_keyboard(config: Config, tg: Telegram, roll: dict) -> dict:
 async def send_roll_card(tg: Telegram, game: Game, config: Config, user: dict, roll: dict, chat_id: int | None = None) -> dict:
     plate, ev = game.roll_objects(roll)
     png = await in_thread(render_card, plate, ev, "Номер выпал", user.get("first_name") or "Игрок",
-                                  tg.me.get("username", "bot"), game.country_name(plate.country))
+                          tg.me.get("username", "bot"), game.country_name(plate.country), "",
+                          BY_ID.get(game.storage.car_of(user["id"]) or ""))
     return await tg("sendPhoto", files={"photo": ("card.png", png)}, chat_id=chat_id or user["id"],
                     caption=roll_caption(game, roll), parse_mode="HTML", reply_markup=roll_keyboard(config, tg, roll))
 
@@ -149,6 +154,8 @@ class Handlers:
             await self.cmd_top(user)
         elif cmd == "/energy":
             await self.cmd_energy(user)
+        elif cmd in ("/cars", "/salon", "/car"):
+            await self.cmd_cars(user)
         elif cmd in ("/app", "/help"):
             await self.cmd_help(user)
         elif text:
@@ -168,7 +175,7 @@ class Handlers:
         if ab:
             rows.append([ab])
         rows.append([btn("⚡ Бросить номер", "roll")])
-        rows.append([btn("📤 В любой чат", switch_inline_query="")])
+        rows.append([btn("🚀 Автосалон", "cars"), btn("📤 В любой чат", switch_inline_query="")])
         if self.admin and self.admin.is_admin(user["id"]):
             rows.append([btn("⚙️ Админка", "a:main")])
         return kb(rows)
@@ -179,7 +186,7 @@ class Handlers:
                 "редкость, очки, цена на рынке. Лучшие сохраняй в гараж.\n\n"
                 f"⚡ Энергия: {self.config.energy_max} бросков, +1 каждые {regen_text(self.config.energy_regen_sec)}. "
                 "Докупить: /energy\n"
-                "💰 Редкие номера можно продать за прокруты.\n"
+                "💰 Номера продаются за прокруты или за деньги, на деньги покупаются машины: /cars\n"
                 "🌟 Напиши свой номер, например <code>А777АА 777</code>, — оценю.")
 
     async def _send_media(self, kind: str, file_id: str, chat_id: int, caption: str, markup: dict) -> bool:
@@ -274,7 +281,7 @@ class Handlers:
             lines.append(f"<b>{esc(plate.text)}</b> · {esc(ev.tier_name)} · {esc(format_price(ev, plate.country))}"
                          + (" · навсегда" if r["forever"] else ""))
         return (f"⭐ <b>Гараж</b> {len(garage)}/{stats['slots']}\n\n" + "\n".join(lines)
-                + "\n\n🗑 — убрать номер и освободить место, 💰 — продать за прокруты")
+                + "\n\n🗑 — убрать номер, ⚡ — продать за прокруты, 💰 — продать за деньги. Машины: /cars")
 
     def garage_keyboard(self, garage: list[dict], confirm: int | None = None) -> dict | None:
         """По строке на номер: удалить и, если бот его выкупает, продать. confirm — номер, который ждёт «Да»."""
@@ -285,9 +292,11 @@ class Handlers:
                              btn("✅ Да", f"del!:{r['id']}", style="danger"), btn("❌ Нет", "del0")])
                 continue
             row = [btn(f"🗑 {r['plate']['text']}", f"del:{r['id']}")]
-            price = self.config.sell_price(r)
+            price, money = self.config.sell_price(r), self.config.money_price(r)
             if price:
-                row.append(btn(f"💰 Продать · {price} ⚡", f"sell:{r['id']}:g"))
+                row.append(btn(f"⚡ {price}", f"sell:{r['id']}:g"))
+            if money:
+                row.append(btn(f"💰 {fmt_money(money)}", f"sellm:{r['id']}:g"))
             rows.append(row)
         return kb(rows) if rows else None
 
@@ -414,11 +423,18 @@ class Handlers:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             await self.send_energy_invoice(user, pack)
             return
-        if data.startswith("sell:"):
+        if data.startswith(("sell:", "sellm:")):
             await self.on_sell(cq, data)
+            return
+        if data.startswith("car:"):
+            await self.on_car(cq, data)
             return
         if data.startswith(("del:", "del!:")) or data == "del0":
             await self.on_garage_delete(cq, data)
+            return
+        if data == "cars":
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            await self.cmd_cars(user)
             return
         if data == "noop":
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
@@ -457,6 +473,51 @@ class Handlers:
             return
         await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
 
+    # ------------------------------------------------------------ автосалон
+
+    def cars_screen(self, user_id: int) -> tuple[str, dict]:
+        w = self.storage.wallet(user_id)
+        lines = ["🚀 <b>Автосалон</b>", f"💰 На счету: <b>{fmt_money(w['money'])}</b>", ""]
+        rows = []
+        for c in CARS:
+            if c["id"] == w["car"]:
+                lines.append(f"✅ <b>{esc(c['name'])}</b> — за рулём")
+            elif c["id"] in w["owned"]:
+                lines.append(f"⭐ <b>{esc(c['name'])}</b> — в гараже")
+                rows.append([btn(f"🔑 Сесть в {c['name']}", f"car:use:{c['id']}")])
+            else:
+                lines.append(f"🔒 {esc(c['name'])} — {fmt_money(c['price'])}")
+                if w["money"] >= c["price"]:
+                    rows.append([btn(f"💰 Купить {c['name']}", f"car:buy:{c['id']}", style="success")])
+        lines += ["", "Продавай номера за деньги и покупай машины. Машина, в которой ты за рулём, появляется на карточках твоих номеров."]
+        return "\n".join(lines), kb(rows)
+
+    async def cmd_cars(self, user: dict) -> None:
+        text, markup = self.cars_screen(user["id"])
+        await self.tg("sendMessage", chat_id=user["id"], parse_mode="HTML", text=text, reply_markup=markup)
+
+    async def on_car(self, cq: dict, data: str) -> None:
+        user, msg = cq["from"], cq.get("message") or {}
+        _, action, car_id = (data.split(":") + ["", ""])[:3]
+        car = BY_ID.get(car_id)
+        if not car:
+            await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
+            return
+        if action == "buy":
+            status = self.storage.buy_car(user["id"], car_id, car["price"])
+            note = {"ok": f"Поздравляю, {car['name']} твоя", "owned": "Эта машина у тебя уже есть",
+                    "poor": f"Не хватает денег: нужно {fmt_money(car['price'])}"}[status]
+        else:
+            note = f"Ты за рулём {car['name']}" if self.storage.use_car(user["id"], car_id) else "Сначала купи эту машину"
+        await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text=note)
+        if msg:
+            text, markup = self.cars_screen(user["id"])
+            try:
+                await self.tg("editMessageText", chat_id=msg["chat"]["id"], message_id=msg["message_id"],
+                              parse_mode="HTML", text=text, reply_markup=markup)
+            except TelegramError:
+                pass
+
     def remember_card(self, roll: dict, sent) -> None:
         try:
             self.cards.remember(roll["id"], sent["photo"][-1]["file_id"])
@@ -473,7 +534,9 @@ class Handlers:
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"])
             return
         in_group = (msg.get("chat") or {}).get("type") in ("group", "supergroup")
-        status, roll, gain = self.storage.sell_roll(roll_id, user["id"], self.config.sell_price)
+        money = parts[0] == "sellm"
+        status, roll, gain = self.storage.sell_roll(roll_id, user["id"],
+                                                    self.config.money_price if money else self.config.sell_price, money)
         texts = {
             "missing": "Это чужой номер. Напиши .ролл, чтобы выбить свой" if in_group else "Номер не найден",
             "sold": "Этот номер уже продан",
@@ -483,9 +546,11 @@ class Handlers:
         if status != "ok":
             await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text=texts[status], show_alert=status == "missing")
             return
-        en = self.storage.energy(user["id"])
-        await self.tg("answerCallbackQuery", callback_query_id=cq["id"],
-                      text=f"Продано за {gain} прокрутов. Энергия: {en['current']}")
+        if money:
+            done = f"Продано за {fmt_money(gain)}. На счету: {fmt_money(self.storage.wallet(user['id'])['money'])}"
+        else:
+            done = f"Продано за {gain} прокрутов. Энергия: {self.storage.energy(user['id'])['current']}"
+        await self.tg("answerCallbackQuery", callback_query_id=cq["id"], text=done)
         if not msg:
             return
         chat_id, mid = msg["chat"]["id"], msg["message_id"]
@@ -503,7 +568,15 @@ class Handlers:
                               reply_markup=roll_keyboard(self.config, self.tg, roll))
         except TelegramError:
             pass
-        if in_group and gain >= 10:                       # громкие продажи видно всему чату
+        if in_group and money and gain >= 1_000_000:
+            from .groups import mention
+            try:
+                await self.tg("sendMessage", chat_id=chat_id, parse_mode="HTML",
+                              reply_parameters={"message_id": mid, "allow_sending_without_reply": True},
+                              text=f"💰 {mention(user)} продал <b>{esc(roll['plate']['text'])}</b> за {fmt_money(gain)}")
+            except TelegramError:
+                pass
+        if in_group and not money and gain >= 10:         # громкие продажи видно всему чату
             from .groups import mention
             try:
                 await self.tg("sendMessage", chat_id=chat_id, parse_mode="HTML",

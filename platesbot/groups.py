@@ -53,14 +53,12 @@ class Groups:
 
     def card_keyboard(self, roll: dict) -> dict:
         rows = []
-        price = self.config.sell_price(roll)
-        row = []
+        from .handlers import sell_buttons
         if not roll["saved"] and not roll.get("sold"):
-            row.append(btn("⭐ В гараж", f"save:{roll['id']}", style="primary"))
-        if price:
-            row.append(btn(f"💰 Продать за {price} ⚡", f"sell:{roll['id']}"))
-        if row:
-            rows.append(row)
+            rows.append([btn("⭐ В гараж", f"save:{roll['id']}", style="primary")])
+        sb = sell_buttons(self.config, roll)
+        if sb:
+            rows.append(sb)
         rows.append([btn("⚡ Крутить свой", "groll", style="primary")])
         rows.append([btn("✨ Открыть бота", url=self.bot_link("g"))])
         return kb(rows)
@@ -123,8 +121,10 @@ class Groups:
                           reply_markup=kb([[btn("⚡ Пополнить энергию", url=self.bot_link("energy"))]]))
             return
         plate, ev = self.game.roll_objects(roll)
+        from core.cars import BY_ID
         png = await in_thread(render_card, plate, ev, "Номер выпал", user.get("first_name") or "Игрок",
-                                      self.tg.me.get("username", "bot"), self.game.country_name(plate.country))
+                              self.tg.me.get("username", "bot"), self.game.country_name(plate.country), "",
+                              BY_ID.get(self.storage.car_of(user["id"]) or ""))
         where = self.game.country_name(plate.country) + (f", {plate.region_name}" if plate.region_name else "")
         caption = (f"⚡ {mention(user)} выбил номер <b>{esc(plate.text)}</b>\n"
                    f"🌟 {esc(where)}\n"

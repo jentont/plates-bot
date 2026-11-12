@@ -315,8 +315,123 @@ def draw_plate(img: Image.Image, plate: Plate, box: tuple[int, int, int, int]) -
     img.paste(pl, (x, y), pl)
 
 
+def draw_car(img: Image.Image, car: dict, x: int, y: int, w: int) -> int:
+    """Машина спереди: кузов шириной w, верх кузова на высоте y. Возвращает нижнюю кромку кузова.
+
+    Форма задаётся параметрами из core/cars.py; тот же рисунок повторяет SVG в мини-апе.
+    """
+    d = ImageDraw.Draw(img)
+    col = _hex(car["color"])
+    dark, light = _mix(col, (0, 0, 0), .45), _mix(col, (255, 255, 255), .22)
+    bh, ch, cw = int(car["bh"] * w), int(car["ch"] * w), int(car["cw"] * w)
+    ch = min(ch, y - 44)                               # высокая кабина не вылезает за рамку карточки
+    cx, bottom = x + w // 2, y + bh
+    # колёса выглядывают из-под кузова
+    ww, wh = int(w * .13), int(w * .045)
+    for wx in (x + int(w * .07), x + w - int(w * .07) - ww):
+        d.rounded_rectangle([wx, bottom - 10, wx + ww, bottom + wh], radius=8, fill=(8, 8, 9))
+    # кабина: трапеция со стеклом
+    top = y - ch
+    d.polygon([(cx - cw // 2, y + 4), (cx - int(cw * .39), top), (cx + int(cw * .39), top), (cx + cw // 2, y + 4)], fill=dark)
+    g = 10
+    d.polygon([(cx - cw // 2 + g * 2, y), (cx - int(cw * .39) + g, top + g), (cx + int(cw * .39) - g, top + g),
+               (cx + cw // 2 - g * 2, y)], fill=(22, 26, 32))
+    d.polygon([(cx - cw // 2 + g * 2, y), (cx - int(cw * .39) + g, top + g), (cx - int(cw * .1), top + g),
+               (cx - int(cw * .22), y)], fill=(38, 44, 54))                        # отблеск на стекле
+    # зеркала
+    for side in (-1, 1):
+        mx = cx + side * (cw // 2 + 6)
+        d.rounded_rectangle([min(mx, mx + side * 34), y - 26, max(mx, mx + side * 34), y - 6], radius=6, fill=dark)
+    # кузов
+    d.rounded_rectangle([x, y, x + w, bottom], radius=int(bh * .22), fill=col)
+    d.rounded_rectangle([x, y, x + w, y + int(bh * .30)], radius=int(bh * .22), fill=light)
+    d.rectangle([x, y + int(bh * .18), x + w, y + int(bh * .30)], fill=light)
+    d.rounded_rectangle([x, bottom - int(bh * .26), x + w, bottom], radius=int(bh * .2), fill=dark)   # бампер
+    if car.get("chrome"):
+        d.rectangle([x + 14, bottom - int(bh * .26), x + w - 14, bottom - int(bh * .26) + 7], fill=(196, 198, 204))
+    # фары
+    ly, lw = y + int(bh * .36), int(w * .105)
+    for side in (-1, 1):
+        lx = x + int(w * .035) if side < 0 else x + w - int(w * .035) - lw
+        kind = car["lights"]
+        if kind == "round":
+            r = int(lw * .46)
+            c0 = lx + lw // 2
+            d.ellipse([c0 - r - 4, ly - 4, c0 + r + 4, ly + 2 * r + 4], fill=(30, 31, 35))
+            d.ellipse([c0 - r, ly, c0 + r, ly + 2 * r], fill=(250, 246, 220))
+            d.ellipse([c0 - r // 2, ly + r // 2, c0 + r // 2, ly + r + r // 2], fill=(255, 255, 255))
+        elif kind == "slim":
+            d.rounded_rectangle([lx, ly + 8, lx + lw, ly + 8 + int(lw * .26)], radius=8, fill=(250, 250, 255))
+        else:
+            d.rounded_rectangle([lx - 3, ly - 3, lx + lw + 3, ly + int(lw * .52) + 3], radius=8, fill=(30, 31, 35))
+            d.rounded_rectangle([lx, ly, lx + lw, ly + int(lw * .52)], radius=6, fill=(250, 246, 220))
+    # решётка по бокам от номера (центр занят рамкой): по ней узнаётся марка
+    kind, gy0, gy1, gw = car["grille"], y + int(bh * .40), bottom - int(bh * .30), int(w * .068)
+    chrome = (196, 198, 204)
+    for side in (-1, 1):
+        gx = x + int(w * .15) if side < 0 else x + w - int(w * .15) - gw
+        if kind == "kidney":
+            d.rounded_rectangle([gx, gy0, gx + gw, gy1], radius=14, fill=(10, 10, 12), outline=chrome, width=4)
+        elif kind == "bars":
+            d.rectangle([gx, gy0, gx + gw, gy1], fill=(10, 10, 12))
+            for k in range(5):
+                bx = gx + 4 + k * (gw - 8) // 4
+                d.rectangle([bx - 2, gy0, bx + 2, gy1], fill=chrome)
+        elif kind == "slats":
+            d.rectangle([gx, gy0, gx + gw, gy1], fill=(10, 10, 12))
+            for k in range(1, 4):
+                yy = gy0 + k * (gy1 - gy0) // 4
+                d.rectangle([gx, yy - 2, gx + gw, yy + 2], fill=_mix(chrome, (0, 0, 0), .35))
+        elif kind == "wide":
+            d.polygon([(gx, gy0 + 8), (gx + gw, gy0), (gx + gw, gy1), (gx, gy1 - 8)] if side < 0 else
+                      [(gx, gy0), (gx + gw, gy0 + 8), (gx + gw, gy1 - 8), (gx, gy1)], fill=(10, 10, 12))
+        elif kind == "horseshoe":
+            d.arc([gx, gy0 - 6, gx + gw, gy1 + 6], 90 if side < 0 else 270, 270 if side < 0 else 90, fill=chrome, width=6)
+    return bottom
+
+
+CAR_PHOTOS = ROOT / "assets" / "cars"
+PHOTO_BOX = (26, 26, W - 26, 392)          # куда встаёт фото машины на карточке
+
+
+@lru_cache(maxsize=16)
+def _car_photo(car_id: str) -> Image.Image | None:
+    """Фото машины, обрезанное под карточку, со скруглением и затемнением снизу и сверху."""
+    path = CAR_PHOTOS / f"{car_id}.jpg"
+    if not path.exists():
+        return None
+    x0, y0, x1, y1 = PHOTO_BOX
+    bw, bh = x1 - x0, y1 - y0
+    src = Image.open(path).convert("RGB")
+    k = max(bw / src.width, bh / src.height)
+    src = src.resize((int(src.width * k) + 1, int(src.height * k) + 1), Image.LANCZOS)
+    left, top = (src.width - bw) // 2, int((src.height - bh) * .58)      # машина обычно чуть ниже центра кадра
+    src = src.crop((left, top, left + bw, top + bh))
+    shade = Image.new("L", (bw, bh), 0)
+    sd = ImageDraw.Draw(shade)
+    for i in range(bh):
+        t = i / bh
+        a = 150 * max(0, 1 - t / .28) ** 1.5 + 235 * max(0, (t - .5) / .5) ** 1.6
+        sd.line([(0, i), (bw, i)], fill=int(min(255, a)))
+    src.paste((8, 8, 10), (0, 0), shade)
+    out = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
+    mask = Image.new("L", (bw, bh), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, bw - 1, bh - 1], radius=22, fill=255)
+    out.paste(src, (0, 0), mask)
+    return out
+
+
+def car_badge(d: ImageDraw.ImageDraw, car: dict, cx: int, y: int) -> None:
+    """Название машины под кабиной — маленькая табличка на капоте."""
+    f = font("bold", 20)
+    text = car["name"]
+    tw = _tw(d, text, f)
+    d.rounded_rectangle([cx - tw // 2 - 14, y, cx + tw // 2 + 14, y + 32], radius=16, fill=(12, 12, 14))
+    d.text((cx - tw // 2, y + 4), text, font=f, fill=(215, 217, 222))
+
+
 def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_name: str,
-                country_name: str, footer: str = "") -> bytes:
+                country_name: str, footer: str = "", car: dict | None = None) -> bytes:
     color = _hex(ev.tier_color)
     special = ev.score >= 62
     img = _background().copy()
@@ -325,15 +440,44 @@ def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_na
     _logo(d, 60, 52)
     f_small = font("text", 24)
     where = country_name + (f" · {plate.region_name}" if plate.region_name and plate.region_name != country_name else "")
-    where = _ellipsis(d, where, f_small, 560)
+    where = _ellipsis(d, where, f_small, 290 if car else 560)
     d.text((W - 60 - _tw(d, where, f_small), 62), where, font=f_small, fill=MUTED)
 
-    holder = _holder(plate, 760, ev.tier_name, color)
-    hx, hy = (W - holder.width) // 2, 128
-    _place_holder(img, holder, hx, hy, color)
-    d = ImageDraw.Draw(img)
+    photo = _car_photo(car["id"]) if car else None
+    if photo:    # реальное фото машины игрока, номер — табличкой поверх нижней кромки
+        img.paste(photo, PHOTO_BOX[:2], photo)
+        d = ImageDraw.Draw(img)
+        _logo(d, 60, 52)
+        d.text((W - 60 - _tw(d, where, f_small), 62), where, font=f_small, fill=(225, 227, 232))
+        holder = _holder(plate, 520, ev.tier_name, color)
+        hx, hy = (W - holder.width) // 2, 414 - holder.height
+        shadow = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(shadow).rounded_rectangle([hx - 6, hy + 10, hx + holder.width + 6, hy + holder.height + 16], radius=24, fill=200)
+        img.paste((0, 0, 0), (0, 0), shadow.filter(ImageFilter.GaussianBlur(16)))
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        layer.alpha_composite(holder, (hx, hy))
+        img.paste(layer, (0, 0), layer)
+        d = ImageDraw.Draw(img)
+        f_car = font("bold", 22)
+        d.text((60, 352), car["name"], font=f_car, fill=(235, 236, 240))
+    elif car:    # фото нет — рисованная машина, номер на бампере
+        cw_px = 900
+        body_y = 400 - int(car["bh"] * cw_px)          # низ кузова всегда на одной линии
+        bottom = draw_car(img, car, (W - cw_px) // 2, body_y, cw_px)
+        holder = _holder(plate, 500, ev.tier_name, color)
+        hx, hy = (W - holder.width) // 2, bottom - holder.height - 14
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        layer.alpha_composite(holder, (hx, hy))
+        img.paste(layer, (0, 0), layer)
+        d = ImageDraw.Draw(img)
+        car_badge(d, car, W // 2, body_y + 12)
+    else:
+        holder = _holder(plate, 760, ev.tier_name, color)
+        hx, hy = (W - holder.width) // 2, 128
+        _place_holder(img, holder, hx, hy, color)
+        d = ImageDraw.Draw(img)
 
-    if special:                                           # редким номерам — искры вокруг
+    if special and not photo:                             # редким номерам — искры вокруг
         rng = random.Random(plate.text)
         for _ in range(22 if ev.score >= 80 else 12):
             side = rng.choice((-1, 1))
@@ -341,7 +485,7 @@ def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_na
             _spark(d, sx, hy + rng.randint(-40, holder.height + 30), rng.randint(5, 15), _mix(color, (255, 255, 255), rng.random() * .6))
 
     # слева: редкость и цена
-    y0 = 420
+    y0 = 444 if car else 420
     f_tier = font("bold", 30)
     d.ellipse([60, y0 + 12, 78, y0 + 30], fill=color)
     d.text((92, y0), ev.tier_name, font=f_tier, fill=color)
@@ -356,7 +500,7 @@ def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_na
     # шкала из шести уровней
     tiers = ["#8E97A8", "#5FB2FF", "#7C6CFF", "#E85CFF", "#FFB020", "#FF3B3B"]
     idx = max(i for i, c in enumerate(tiers) if c.lower() == ev.tier_color.lower()) if ev.tier_color.upper() in [c.upper() for c in tiers] else 0
-    for i, c in enumerate(tiers):
+    for i, c in enumerate([] if car else tiers):     # с машиной шкале не хватает места
         d.rounded_rectangle([60 + i * 62, y0 + 152, 60 + i * 62 + 54, y0 + 159], radius=4, fill=_hex(c) if i <= idx else (40, 41, 46))
 
     # справа: причины
@@ -381,6 +525,10 @@ def render_card(plate: Plate, ev: Evaluation, title: str, user_name: str, bot_na
     d.text((60, H - 70), f"{title} · {name}" if title else name, font=f_foot, fill=MUTED)
     tag = footer or f"@{bot_name}"
     d.text((W - 60 - _tw(d, tag, f_foot), H - 70), tag, font=f_foot, fill=MUTED)
+    if photo:        # с фотографией PNG весит под мегабайт — отдаём JPEG, Telegram понимает его по содержимому
+        out = io.BytesIO()
+        img.convert("RGB").save(out, "JPEG", quality=90)
+        return out.getvalue()
     return _png(img)
 
 

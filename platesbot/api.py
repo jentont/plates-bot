@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl
 
 from aiohttp import web
 
+from core.cars import BY_ID, CARS
 from core.plates import COUNTRIES, Plate, country_list
 from core.rarity import Evaluation
 
@@ -116,6 +117,7 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         out = {k: roll[k] for k in ("id", "plate", "eval", "created", "expires", "saved", "forever")}
         out["sold"] = roll.get("sold", False)
         out["sell"] = config.sell_price(roll)
+        out["money"] = config.money_price(roll)
         return out
 
     @routes.get("/")
@@ -137,6 +139,8 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
             "last": roll_payload(last) if last else None,
             "ai": bool(ai),
             "sell_prices": config.sell_prices,
+            "wallet": storage.wallet(uid),
+            "cars": CARS,
             "energy_packs": config.energy_packs,
         })
 
@@ -208,6 +212,24 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
                                   "garage": [roll_payload(r) for r in garage],
                                   "slots_left": max(0, storage.stats(user["id"])["slots"] - len(garage))})
 
+    @routes.post("/api/car")
+    async def car_action(request):
+        """Купить машину ({"buy": id}) или сесть в купленную ({"use": id}, пустая строка — пешком)."""
+        user = user_of(request)
+        body = await request.json()
+        if "buy" in body:
+            car = BY_ID.get(str(body["buy"]))
+            if not car:
+                return err(404, "Такой машины нет")
+            status = storage.buy_car(user["id"], car["id"], car["price"])
+            if status == "poor":
+                return err(409, "Не хватает денег")
+        else:
+            car_id = str(body.get("use", ""))
+            if (car_id and car_id not in BY_ID) or not storage.use_car(user["id"], car_id):
+                return err(409, "Сначала купи эту машину")
+        return web.json_response({"ok": True, "wallet": storage.wallet(user["id"])})
+
     @routes.post("/api/garage/delete")
     async def garage_delete(request):
         user = user_of(request)
@@ -222,13 +244,15 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         """Продать номер боту за прокруты."""
         user = user_of(request)
         body = await request.json()
-        status, roll, gain = storage.sell_roll(int(body.get("roll_id", 0)), user["id"], config.sell_price)
+        money = bool(body.get("money"))
+        status, roll, gain = storage.sell_roll(int(body.get("roll_id", 0)), user["id"],
+                                               config.money_price if money else config.sell_price, money)
         if status != "ok":
             texts = {"missing": "Номер не найден", "sold": "Этот номер уже продан",
                      "expired": "Номер сгорел", "cheap": "Обычные номера бот не выкупает"}
             return err(409 if status != "missing" else 404, texts[status])
-        return web.json_response({"ok": True, "gain": gain, "roll": roll_payload(roll),
-                                  "energy": storage.energy(user["id"]),
+        return web.json_response({"ok": True, "gain": gain, "money": money, "roll": roll_payload(roll),
+                                  "energy": storage.energy(user["id"]), "wallet": storage.wallet(user["id"]),
                                   "garage": [roll_payload(r) for r in storage.garage(user["id"])]})
 
     @routes.post("/api/settings")
@@ -293,17 +317,17 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
         if not roll:
             raise web.HTTPNotFound()
         png = await in_thread(_card_png, roll["id"], json.dumps(roll["plate"], sort_keys=True),
-                                      json.dumps(roll["eval"], sort_keys=True))
+                              json.dumps(roll["eval"], sort_keys=True), storage.car_of(roll["user_id"]) or "")
         return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
     @lru_cache(maxsize=256)
-    def _card_png(roll_id: int, plate_json: str, eval_json: str) -> bytes:
+    def _card_png(roll_id: int, plate_json: str, eval_json: str, car_id: str = "") -> bytes:
         roll = storage.get_roll(roll_id)
         user = storage.db.execute("SELECT first_name, username FROM users WHERE id=?", (roll["user_id"],)).fetchone()
         plate, ev = Plate(**json.loads(plate_json)), Evaluation(**json.loads(eval_json))
         name = (user["first_name"] or user["username"] or "Игрок") if user else "Игрок"
         return render_card(plate, ev, "Номер выпал", name, (tg.me.get("username") if tg else "") or "bot",
-                           game.country_name(plate.country))
+                           game.country_name(plate.country), "", BY_ID.get(car_id))
 
     @routes.get("/card/cover_{kind}.png")
     async def cover(request):
