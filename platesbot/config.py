@@ -81,30 +81,27 @@ def _sell_prices() -> dict:
 PERSISTENT_DIRS = ("/data", "/var/data", "/persistent")
 
 
-def _writable(d: Path) -> bool:
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        probe = d / ".write_test"
-        probe.write_text("ok")
-        probe.unlink()
-        return True
-    except OSError:
-        return False
-
-
 def _db_path() -> Path:
-    """Где лежит база. DATA_DIR → DB_PATH → постоянные папки хостинга (/data и т.п.) → data/ рядом с кодом.
+    """Где лежит база: DATA_DIR → DB_PATH → data/ рядом с кодом (на Bothost это /app/data — постоянная папка).
 
-    Папку с кодом хостинг перезаписывает при каждом передеплое, и база в ней пропадает.
+    Если база раньше лежала в /data или похожей папке, а в data/ её нет, — один раз переносим её оттуда.
     """
     if os.environ.get("DATA_DIR"):
         return Path(os.environ["DATA_DIR"]) / "plates.db"
     if os.environ.get("DB_PATH"):
         return ROOT / os.environ["DB_PATH"]
-    for d in PERSISTENT_DIRS:
-        if Path(d).is_dir() and _writable(Path(d)):
-            return Path(d) / "plates.db"
-    return ROOT / "data" / "plates.db"
+    main = ROOT / "data" / "plates.db"
+    if not main.exists():
+        for d in PERSISTENT_DIRS:
+            old = Path(d) / "plates.db"
+            if old.exists() and old.stat().st_size > 0:
+                try:
+                    main.parent.mkdir(parents=True, exist_ok=True)
+                    main.write_bytes(old.read_bytes())
+                except OSError:
+                    return old
+                break
+    return main
 
 
 def _ids(raw: str) -> tuple[int, ...]:
