@@ -53,6 +53,23 @@ class Storage:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path), check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self.migrate()
+        self.lock = threading.Lock()
+        self.energy_max, self.regen_sec, self.free_slots, self.ttl = energy_max, regen_sec, free_slots, ttl_sec
+
+    def restore_from(self, path: Path) -> None:
+        """Заменить всё содержимое базы копией из файла, не закрывая соединение (бот продолжает работать)."""
+        with self.lock:
+            self.db.commit()
+            src = sqlite3.connect(str(path))
+            try:
+                src.backup(self.db)
+            finally:
+                src.close()
+            self.migrate()
+
+    def migrate(self) -> None:
+        """Схема и все миграции. Вызывается при открытии и после восстановления из старой копии."""
         self.db.executescript(SCHEMA)
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
         if "blocked" not in cols:     # старые базы: отметка «заблокировал бота» для рассылки и статистики
@@ -74,8 +91,6 @@ class Storage:
             self.db.execute("ALTER TABLE rolls ADD COLUMN sold_for INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
         self._migrate_progress()
-        self.lock = threading.Lock()
-        self.energy_max, self.regen_sec, self.free_slots, self.ttl = energy_max, regen_sec, free_slots, ttl_sec
 
     def _migrate_progress(self) -> None:
         """Задания, кейсы, улучшения, коллекция, достижения (появились позже, поэтому миграцией)."""

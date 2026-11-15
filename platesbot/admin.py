@@ -58,6 +58,10 @@ class Admin:
             self.state.pop(user["id"], None)
             await self.send(user["id"], PANEL, panel_kb())
             return True
+        caption = (m.get("caption") or "").strip()
+        if text.split("@")[0] == "/restore" or caption.split("@")[0] == "/restore":
+            await self._restore(user["id"], m)
+            return True
         st = self.state.get(user["id"])
         if not st:
             return False
@@ -69,6 +73,28 @@ class Admin:
             await handler(user["id"], m, data)
             return True
         return False
+
+    async def _restore(self, uid: int, m: dict) -> None:
+        """/restore ответом на файл plates-backup (или файл с подписью /restore): вернуть базу из этой копии."""
+        from .backup import is_backup
+        doc = m.get("document") or (m.get("reply_to_message") or {}).get("document")
+        if not is_backup(doc):
+            await self.send(uid, "Ответь командой /restore на сообщение с файлом <b>plates-backup-….db.gz</b> — "
+                                 "бот вернёт базу из этой копии.")
+            return
+        if not self.backup:
+            await self.send(uid, "Бэкап не запущен, восстановить нечем.")
+            return
+        before = self.storage.global_stats()["users"]
+        await self.send(uid, f"⏳ Восстанавливаю из <code>{html.escape(doc.get('file_name', ''))}</code>…")
+        try:
+            users, rolls = await self.backup.restore(doc["file_id"])
+        except Exception as e:  # noqa: BLE001
+            log.exception("restore")
+            await self.send(uid, f"❌ Не получилось: {html.escape(str(e))}\nТекущая база не тронута.")
+            return
+        await self.send(uid, f"✅ База восстановлена: <b>{users}</b> игроков, <b>{rolls}</b> бросков "
+                             f"(было {before}). Свежая копия закреплена.\n{html.escape(self.backup.status)}")
 
     async def on_callback(self, cq: dict) -> bool:
         data = cq.get("data", "")
@@ -184,7 +210,8 @@ class Admin:
                 f"Куда: <code>{where}</code>{' (личка админа)' if not self.config.backup_chat else ''}\n"
                 f"Статус: {html.escape(self.backup.status)}\n\n"
                 f"Бот сам сохраняет копию раз в {self.config.backup_every // 60} мин, если в базе что-то поменялось, "
-                "и закрепляет её. Если после передеплоя база пустая, бот при запуске восстановится из закреплённой копии."),
+                "и закрепляет её. Если после передеплоя база пустая, бот при запуске восстановится из закреплённой копии.\n\n"
+                "Вернуть базу из любой копии вручную: ответь на сообщение с файлом plates-backup командой /restore."),
                 kb([[B("📥 Сделать сейчас", "a:bk!")], BACK]))
         elif action == "store0":
             self.state.pop(uid, None)
