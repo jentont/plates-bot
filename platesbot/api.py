@@ -19,6 +19,7 @@ from core.rarity import Evaluation
 
 from .config import Config
 from .game import Game, NoEnergy
+from .progress import CASES, Progress
 from .render import render_card, render_cover, in_thread
 
 log = logging.getLogger("api")
@@ -97,6 +98,7 @@ class Feed:
 def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsors=None) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     storage = game.storage
+    progress = Progress(storage, game.rng)
     routes = web.RouteTableDef()
 
     def user_of(request: web.Request) -> dict:
@@ -142,6 +144,8 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
             "wallet": storage.wallet(uid),
             "cars": CARS,
             "energy_packs": config.energy_packs,
+            "upgrades": progress.upgrades(uid),
+            "badge": progress.badge(uid),
         })
 
     @routes.get("/api/energy")
@@ -186,8 +190,14 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
             roll = game.spin(user, "app", body.get("country"))
         except NoEnergy:
             return err(429, "no_energy", energy=storage.energy(user["id"]))
+        auto_sold = progress.autosell_after_spin(user["id"], roll, config.money_price)
+        if auto_sold:
+            roll = storage.get_roll(roll["id"])
         payload = roll_payload(roll)
         payload["energy"] = storage.energy(user["id"])
+        payload["auto_sold"] = auto_sold
+        if auto_sold:
+            payload["wallet"] = storage.wallet(user["id"])
         return web.json_response({"roll": payload})
 
     @routes.post("/api/save")
@@ -289,6 +299,75 @@ def create_app(config: Config, game: Game, feed: Feed, tg=None, ai=None, sponsor
             log.warning("ai: %s", e)
             return err(502, "Нейросеть не ответила, попробуй позже")
         return web.json_response(data)
+
+    # ------------------------------------------------------------ меню: задания, кейсы, улучшения
+
+    async def body_of(request) -> dict:
+        try:
+            data = await request.json()
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @routes.get("/api/menu/{part}")
+    async def menu_part(request):
+        uid = user_of(request)["id"]
+        part = request.match_info["part"]
+        if part == "tasks":
+            data = {**progress.tasks(uid), "achievements": progress.achievements(uid)}
+        elif part == "collection":
+            data = progress.collection(uid)
+        elif part == "stats":
+            data = progress.stats(uid)
+        elif part == "summary":
+            tasks, ach, coll = progress.tasks(uid)["items"], progress.achievements(uid), progress.collection(uid)
+            data = {"tasks_done": sum(t["done"] for t in tasks), "tasks_total": len(tasks),
+                    "tasks_claim": sum(t["done"] and not t["claimed"] for t in tasks),
+                    "ach_done": sum(a["claimed"] for a in ach), "ach_total": len(ach),
+                    "ach_claim": sum(a["done"] and not a["claimed"] for a in ach),
+                    "found": coll["found"], "total": coll["total"], "spins": storage.stats(uid)["spins"]}
+        elif part == "shop":
+            data = {"cases": CASES, "upgrades": progress.upgrades(uid), "wallet": storage.wallet(uid)}
+        else:
+            raise web.HTTPNotFound()
+        data["badge"] = progress.badge(uid)
+        return web.json_response(data)
+
+    @routes.post("/api/claim")
+    async def claim(request):
+        uid = user_of(request)["id"]
+        body = await body_of(request)
+        status, reward = progress.claim(uid, "task" if body.get("kind") == "task" else "ach", str(body.get("id", "")))
+        if status != "ok":
+            texts = {"missing": "Такого задания нет", "not_done": "Задание ещё не выполнено", "claimed": "Награда уже получена"}
+            return err(409, texts[status])
+        return web.json_response({"ok": True, "reward": reward, "wallet": storage.wallet(uid),
+                                  "energy": storage.energy(uid), "badge": progress.badge(uid)})
+
+    @routes.post("/api/case/open")
+    async def case_open(request):
+        uid = user_of(request)["id"]
+        body = await body_of(request)
+        status, roll = await asyncio.to_thread(progress.open_case, uid, str(body.get("id", "")))
+        if status != "ok":
+            return err(409 if status == "poor" else 404, "Не хватает денег" if status == "poor" else "Такого кейса нет")
+        return web.json_response({"ok": True, "roll": roll_payload(roll), "wallet": storage.wallet(uid),
+                                  "badge": progress.badge(uid)})
+
+    @routes.post("/api/upgrade")
+    async def upgrade(request):
+        uid = user_of(request)["id"]
+        body = await body_of(request)
+        if "autosell" in body:
+            if not progress.set_autosell(uid, str(body["autosell"] or "")):
+                return err(409, "Сначала купи автопродажу")
+        else:
+            status = progress.buy_upgrade(uid, str(body.get("buy", "")))
+            if status != "ok":
+                texts = {"poor": "Не хватает денег", "max": "Уже максимум", "owned": "Уже куплено", "missing": "Такого улучшения нет"}
+                return err(409, texts[status])
+        return web.json_response({"ok": True, "upgrades": progress.upgrades(uid), "wallet": storage.wallet(uid),
+                                  "stats": storage.stats(uid)})
 
     @routes.get("/api/top")
     async def top(request):

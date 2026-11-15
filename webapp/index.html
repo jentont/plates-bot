@@ -7,7 +7,7 @@
 <title>Номера</title>
 <link rel="preload" href="static/fonts/Manrope.ttf" as="font" type="font/ttf" crossorigin>
 <link rel="preload" href="static/fonts/Barlow-Bold.ttf" as="font" type="font/ttf" crossorigin>
-<link rel="stylesheet" href="static/styles.css?v=27">
+<link rel="stylesheet" href="static/styles.css?v=31">
 <script src="https://telegram.org/js/telegram-web-app.js?59"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
@@ -38,7 +38,7 @@
       <span class="logo-plate"><b>НОМЕРА</b><i>777</i></span>
     </div>
     <button class="energy" id="energy" type="button">
-      <img src="static/img/3d/bolt.png" alt="" width="22" height="22">
+      <img src="static/img/3d/bolt.png?w=1" alt="" width="22" height="22">
       <b id="energy-val">0</b>
       <span class="energy-timer" id="energy-timer"></span>
       <span class="energy-plus" aria-hidden="true"></span>
@@ -55,6 +55,8 @@
         <div class="scene-ghosts plx" data-depth="-14" id="ghosts"></div>
         <canvas class="scene-fx" id="fx"></canvas>
         <button class="scene-mode" id="scene-mode" type="button"></button>
+        <button class="scene-auto" id="scene-auto" type="button"><i></i><span data-i18n>Авто</span></button>
+        <div class="scene-skip" id="scene-skip" hidden data-i18n>Нажми, чтобы пропустить</div>
         <div class="rig" id="rig"></div>
         <div class="scene-caption" id="scene-caption"></div>
       </div>
@@ -65,14 +67,15 @@
           <span class="rank" id="r-top"></span>
         </div>
         <div class="price" id="r-price"></div>
+        <p class="fact" id="r-fact" hidden></p>
         <div class="scale" id="ladder"></div>
         <ul class="reasons" id="r-reasons"></ul>
         <div class="result-actions">
           <button class="btn btn-soft" id="btn-save" type="button"><span class="ico" data-icon="star"></span><span data-i18n>В гараж</span></button>
           <button class="btn btn-soft" id="btn-share" type="button"><span class="ico" data-icon="share"></span><span data-i18n>В чат</span></button>
         </div>
-        <button class="btn btn-soft btn-wide btn-sell" id="btn-sell" type="button" hidden><img src="static/img/3d/bolt.png" alt="" width="22" height="22"><span id="btn-sell-label"></span></button>
-        <button class="btn btn-soft btn-wide btn-sell" id="btn-sellm" type="button" hidden><img src="static/img/3d/money.png" alt="" width="22" height="22"><span id="btn-sellm-label"></span></button>
+        <button class="btn btn-soft btn-wide btn-sell" id="btn-sell" type="button" hidden><img src="static/img/3d/bolt.png?w=1" alt="" width="22" height="22"><span id="btn-sell-label"></span></button>
+        <button class="btn btn-soft btn-wide btn-sell" id="btn-sellm" type="button" hidden><img src="static/img/3d/money.png?w=1" alt="" width="22" height="22"><span id="btn-sellm-label"></span></button>
         <button class="btn btn-soft btn-wide" id="btn-ai" type="button" hidden><span class="ico" data-icon="coin"></span><span data-i18n>Оценка нейросети</span></button>
         <div class="ai-box" id="ai-box" hidden></div>
       </div>
@@ -101,25 +104,87 @@
 
     <!-- Гараж -->
     <section class="screen" data-screen="garage">
-      <div class="head">
+      <div class="head head-row">
         <h1 data-i18n>Гараж</h1>
-        <p data-i18n>Несохранённые номера сгорают через 24 часа</p>
+        <span class="wallet" id="garage-wallet"></span>
       </div>
-      <div class="showroom" id="showroom"></div>
-      <div class="figures" id="garage-stats"></div>
-      <div class="garage" id="garage-list"></div>
-      <div class="head head-sub"><h2 data-i18n>Автосалон</h2><p data-i18n>Продавай номера за деньги и покупай машины. Твоя машина появится на карточках номеров</p></div>
-      <div class="shop" id="car-shop"></div>
-      <div class="empty" id="garage-empty" hidden>
-        <img src="static/img/3d/car.png" alt="" width="96" height="96">
-        <p data-i18n>Пока пусто. Крути номера и сохраняй лучшие</p>
+      <div class="seg" id="garage-seg">
+        <i class="seg-thumb"></i>
+        <button type="button" data-part="plates" class="is-on" data-i18n>Номера</button>
+        <button type="button" data-part="shop" data-i18n>Автосалон</button>
+        <button type="button" data-part="top" data-i18n>Топ</button>
       </div>
-      <div class="head head-sub"><h2 data-i18n>Лучшие игроки</h2></div>
-      <div id="top-list"></div>
+
+      <!-- Номера: компактные строки, действия — по нажатию -->
+      <div class="gpart" data-part="plates">
+        <div class="figures" id="garage-stats"></div>
+        <div class="chips" id="garage-sort">
+          <button type="button" data-sort="price" class="is-on" data-i18n>Дороже</button>
+          <button type="button" data-sort="new" data-i18n>Новые</button>
+          <button type="button" data-sort="tier" data-i18n>Редкость</button>
+        </div>
+        <div class="glist" id="garage-list"></div>
+        <p class="gnote" id="garage-note"></p>
+      </div>
+
+      <!-- Автосалон: одна машина на экран, листается свайпом -->
+      <div class="gpart" data-part="shop" hidden>
+        <div class="dealer" id="car-shop"></div>
+        <div class="dealer-dots" id="car-dots"></div>
+      </div>
+
+      <div class="gpart" data-part="top" hidden>
+        <div id="top-list"></div>
+      </div>
     </section>
 
     <!-- Страны -->
-    <section class="screen" data-screen="world">
+    <!-- Меню -->
+    <section class="screen" data-screen="menu">
+      <div class="head">
+        <h1 data-i18n>Меню</h1>
+        <p data-i18n>Задания, кейсы и улучшения</p>
+      </div>
+      <div class="purse" id="purse"></div>
+      <div class="tiles" id="tiles"></div>
+    </section>
+
+    <!-- Страницы меню -->
+    <section class="screen page" data-screen="tasks">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Задания</h1><p id="tasks-reset"></p></div>
+      <div class="list" id="tasks-list"></div>
+    </section>
+    <section class="screen page" data-screen="ach">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Достижения</h1><p data-i18n>Награды за большие цели. Каждую можно забрать один раз</p></div>
+      <div class="list" id="ach-list"></div>
+    </section>
+    <section class="screen page" data-screen="cases">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Кейсы</h1><p data-i18n>Номер с гарантией редкости. Энергию не тратит</p></div>
+      <div class="purse" id="cases-purse"></div>
+      <div class="cases" id="cases-list"></div>
+    </section>
+    <section class="screen page" data-screen="upgrades">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Улучшения</h1><p data-i18n>Покупаются за деньги с продажи номеров</p></div>
+      <div class="purse" id="up-purse"></div>
+      <div class="list" id="up-list"></div>
+    </section>
+    <section class="screen page" data-screen="collection">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Коллекция</h1><p data-i18n>Все редкости российского номера. Выбей каждую хотя бы раз</p></div>
+      <div id="coll-body"></div>
+    </section>
+    <section class="screen page" data-screen="stats">
+      <button class="back" type="button" data-i18n>Меню</button>
+      <div class="head"><h1 data-i18n>Статистика</h1><p data-i18n>Всё, что ты накрутил</p></div>
+      <div id="stats-body"></div>
+    </section>
+
+    <section class="screen page" data-screen="world">
+      <button class="back" type="button" data-i18n>Меню</button>
       <div class="head">
         <h1 data-i18n>Страны</h1>
         <p data-i18n>Какие номера будут выпадать</p>
@@ -152,14 +217,14 @@
   <div class="dock">
     <button class="btn btn-primary btn-spin" id="btn-spin" type="button">
       <span id="btn-spin-label" data-i18n>Крутить</span>
-      <span class="cost"><img src="static/img/3d/bolt.png" alt="" width="16" height="16">1</span>
+      <span class="cost"><img src="static/img/3d/bolt.png?w=1" alt="" width="16" height="16">1</span>
     </button>
     <nav class="tabbar" id="tabs">
       <i class="tab-thumb"></i>
       <button type="button" data-tab="spin" class="is-on"><span class="ico" data-icon="spin"></span><span data-i18n>Крутить</span></button>
       <button type="button" data-tab="feed"><span class="ico" data-icon="feed"></span><span data-i18n>Лента</span></button>
       <button type="button" data-tab="garage"><span class="ico" data-icon="garage"></span><span data-i18n>Гараж</span></button>
-      <button type="button" data-tab="world"><span class="ico" data-icon="world"></span><span data-i18n>Страны</span></button>
+      <button type="button" data-tab="menu"><span class="ico" data-icon="sliders"></span><span data-i18n>Меню</span><i class="dot" id="menu-dot" hidden></i></button>
     </nav>
   </div>
 
@@ -169,7 +234,7 @@
 
   <div class="toast" id="toast" hidden></div>
 </div>
-<script src="static/i18n.js?v=27"></script>
-<script src="static/app.js?v=27"></script>
+<script src="static/i18n.js?v=31"></script>
+<script src="static/app.js?v=31"></script>
 </body>
 </html>

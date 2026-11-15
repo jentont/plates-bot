@@ -73,8 +73,34 @@ class Storage:
             self.db.execute("ALTER TABLE rolls ADD COLUMN sold INTEGER NOT NULL DEFAULT 0")
             self.db.execute("ALTER TABLE rolls ADD COLUMN sold_for INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
+        self._migrate_progress()
         self.lock = threading.Lock()
         self.energy_max, self.regen_sec, self.free_slots, self.ttl = energy_max, regen_sec, free_slots, ttl_sec
+
+    def _migrate_progress(self) -> None:
+        """Задания, кейсы, улучшения, коллекция, достижения (появились позже, поэтому миграцией)."""
+        ucols = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
+        for col, ddl in (("sold_count", "INTEGER NOT NULL DEFAULT 0"), ("auto_owned", "INTEGER NOT NULL DEFAULT 0"),
+                         ("autosell_owned", "INTEGER NOT NULL DEFAULT 0"), ("autosell", "TEXT NOT NULL DEFAULT ''"),
+                         ("earned", "INTEGER NOT NULL DEFAULT 0")):
+            if col not in ucols:
+                self.db.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+                if col == "sold_count":     # старые продажи тоже засчитываем
+                    self.db.execute("UPDATE users SET sold_count=(SELECT COUNT(*) FROM rolls WHERE rolls.user_id=users.id AND sold=1)")
+                if col == "earned":
+                    self.db.execute("UPDATE users SET earned=(SELECT COALESCE(SUM(sold_money), 0) FROM rolls WHERE rolls.user_id=users.id AND sold=1)")
+        if "sold_ts" not in {r["name"] for r in self.db.execute("PRAGMA table_info(rolls)")}:
+            self.db.execute("ALTER TABLE rolls ADD COLUMN sold_ts REAL NOT NULL DEFAULT 0")
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS finds (user_id INTEGER NOT NULL, key TEXT NOT NULL, count INTEGER NOT NULL,
+                                              first REAL NOT NULL, PRIMARY KEY (user_id, key));
+            CREATE TABLE IF NOT EXISTS tier_counts (user_id INTEGER NOT NULL, tier TEXT NOT NULL, count INTEGER NOT NULL,
+                                                    PRIMARY KEY (user_id, tier));
+            CREATE TABLE IF NOT EXISTS claims (user_id INTEGER NOT NULL, key TEXT NOT NULL, ts REAL NOT NULL,
+                                               PRIMARY KEY (user_id, key));
+            CREATE INDEX IF NOT EXISTS rolls_sold ON rolls(user_id, sold_ts);
+        """)
+        self.db.commit()
 
     # ------------------------------------------------------------ users / energy
 
@@ -171,6 +197,11 @@ class Storage:
                 (user_id, plate.country, plate.text, json.dumps(plate.to_dict(), ensure_ascii=False),
                  json.dumps(ev.to_dict(), ensure_ascii=False), ev.score, ev.price_rub, source, now, now + self.ttl))
             self.db.execute("UPDATE users SET best_score=MAX(best_score, ?) WHERE id=?", (ev.score, user_id))
+            self.db.execute("INSERT INTO tier_counts(user_id, tier, count) VALUES (?,?,1) "
+                            "ON CONFLICT(user_id, tier) DO UPDATE SET count=count+1", (user_id, ev.tier))
+            for key in ev.keys:
+                self.db.execute("INSERT INTO finds(user_id, key, count, first) VALUES (?,?,1,?) "
+                                "ON CONFLICT(user_id, key) DO UPDATE SET count=count+1", (user_id, key, now))
             self.db.commit()
             return self.get_roll(cur.lastrowid)
 
@@ -225,12 +256,13 @@ class Storage:
             gain = price_of(roll)
             if gain <= 0:
                 return "cheap", roll, 0
-            cur = self.db.execute("UPDATE rolls SET sold=1, sold_for=?, sold_money=?, saved=0 WHERE id=? AND sold=0",
-                                  (0 if money else gain, gain if money else 0, roll_id))
+            cur = self.db.execute("UPDATE rolls SET sold=1, sold_for=?, sold_money=?, saved=0, sold_ts=? WHERE id=? AND sold=0",
+                                  (0 if money else gain, gain if money else 0, time.time(), roll_id))
             if not cur.rowcount:
                 return "sold", roll, 0
+            self.db.execute("UPDATE users SET sold_count=sold_count+1 WHERE id=?", (user_id,))
             if money:
-                self.db.execute("UPDATE users SET money=money+? WHERE id=?", (gain, user_id))
+                self.db.execute("UPDATE users SET money=money+?, earned=earned+? WHERE id=?", (gain, gain, user_id))
             self.db.commit()
         if not money:
             self.add_energy(user_id, gain)

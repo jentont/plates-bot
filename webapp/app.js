@@ -199,8 +199,11 @@
     $(".tier span", box).textContent = tierName(ev);
     $(".rank", box).textContent = ev.percentile <= 50 ? `${t("топ")} ${ev.percentile || "0.01"}%` : "";
     const [val, cur] = priceOf(plate, ev), priceEl = $(".price", box);
+    if (box === result) { priceAnim++; livePrice = val; }      // живой счётчик открытия больше не трогает цену
     if (animate) countUp(priceEl, val, cur); else priceEl.textContent = fmtMoney(val, cur);
     $(".reasons", box).innerHTML = ev.reasons.map(r => `<li class="${r.points ? "" : "zero"}"><span>${esc(r.title)}</span><b>${r.points ? "+" + r.points : ""}</b></li>`).join("");
+    const fact = $(".fact", box);
+    if (fact) { fact.textContent = ev.fact || ""; fact.hidden = !ev.fact; }
     box.hidden = false;
   }
   function syncActions() {
@@ -212,7 +215,7 @@
     const sell = $("#btn-sell"), price = roll && !roll.sold ? (roll.sell || 0) : 0;
     sell.hidden = !price && !(roll && roll.sold);
     sell.disabled = !!(roll && roll.sold);
-    $("#btn-sell-label").textContent = roll && roll.sold ? t("Продано") : `${t("Продать за")} ${price} ⚡`;
+    $("#btn-sell-label").textContent = roll && roll.sold ? t("Продано") : `${t("Продать за")} ${price} ${t("энергии")}`;
     const sm = $("#btn-sellm"), mp = roll && !roll.sold ? (roll.money || 0) : 0;
     sm.hidden = !mp;
     $("#btn-sellm-label").textContent = `${t("Продать за")} ${fmtMoney(mp, "RUB")}`;
@@ -265,13 +268,101 @@
     $("#recent").innerHTML = history.map(r => `<div class="recent-item" style="--tier:${r.eval.tier_color}">${mini(r.plate, "")}<b>${priceText(r.plate, r.eval)}</b><small>${esc(tierName(r.eval))}</small></div>`).join("");
   }
 
+  /* Открытие номера по одному символу. Цена и редкость меняются по ходу (шаги считает сервер:
+     цена растёт только тогда, когда закономерность уже видна). Если номер набирает редкость,
+     открытие замедляется. Тап по сцене — открыть сразу. */
+  const TIER_COLOR = Object.fromEntries(LADDER.map(l => [l[0], l[1]]));
+  const TIER_RANK = Object.fromEntries(LADDER.map((l, i) => [l[0], i]));
+  let livePrice = 0, priceAnim = 0;
+  function tweenPrice(to, cur, ms = 260) {
+    const el = $("#r-price"), from = livePrice, t0 = performance.now(), id = ++priceAnim;
+    livePrice = to;
+    if (to === from) { el.textContent = fmtMoney(to, cur); return; }
+    const step = now => { if (id !== priceAnim) return; const k = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - k, 3); el.textContent = fmtMoney(from + (to - from) * e, cur); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+  function liveTier(key, item) {
+    const color = TIER_COLOR[key] || TIER_COLOR.common, pos = TIER_RANK[key] || 0;
+    setTier(color);
+    result.style.setProperty("--tier", color);
+    $(".tier span", result).textContent = I.tier(key);
+    $(".pf", item).style.setProperty("--tier", color);
+    $(".pf-lip span", item).textContent = pos ? I.tier(key) : "· · ·";
+    $("#ladder").innerHTML = `<div class="scale-bar">${LADDER.map((l, i) => `<i class="${i <= pos ? "is-on" : ""}" style="--c:${l[1]}"></i>`).join("")}</div>`;
+  }
+  async function reveal(item, roll) {
+    const ev = roll.eval, list = $$(".slot", item), [final, cur] = priceOf(roll.plate, ev);
+    const steps = ev.steps && ev.steps.length ? ev.steps : null, rub = cur === "RUB";
+    list.forEach(s => s.classList.add("is-rolling"));
+    const spinner = setInterval(() => list.forEach(s => { if (s.classList.contains("is-rolling") && s.dataset.alpha) { const a = s.dataset.alpha; s.textContent = a[Math.floor(Math.random() * a.length)]; } }), 55);
+    result.hidden = false; $(".reasons", result).innerHTML = ""; $(".rank", result).textContent = ""; $("#r-fact").hidden = true;
+    $(".result-actions", result).hidden = true; ["#btn-sell", "#btn-sellm", "#btn-ai"].forEach(s => { $(s).hidden = true; });
+    livePrice = 0; priceAnim++; $("#r-price").textContent = fmtMoney(0, cur);
+    let shown = "";
+    liveTier("common", item); shown = "common";
+    state.skip = false;
+    $("#scene-skip").hidden = !!state.auto;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i], last = i === list.length - 1;
+      s.textContent = s.dataset.final; s.classList.remove("is-rolling"); s.classList.remove("is-stamp"); void s.offsetWidth; s.classList.add("is-stamp");
+      const st = last ? [ev.price_rub, ev.tier] : steps ? steps[Math.min(steps.length - 1, Math.round(i * (steps.length - 1) / Math.max(1, list.length - 1)))] : [0, "common"];
+      const val = last ? final : rub ? st[0] : Math.round(st[0] / 90);
+      if (st[1] !== shown) {
+        const up = (TIER_RANK[st[1]] || 0) > (TIER_RANK[shown] || 0);
+        shown = st[1]; liveTier(shown, item);
+        if (up && !state.skip) { burst(TIER_COLOR[shown], .25); haptic.hit(); }
+      } else haptic.tick();
+      tweenPrice(val, cur, state.skip ? 0 : 260);
+      if (!last && !state.skip) {
+        const hot = TIER_RANK[shown] >= 2, fast = state.auto ? 40 : 170;
+        await sleep(hot && !state.auto ? 480 : fast);
+      }
+    }
+    clearInterval(spinner);
+    $("#scene-skip").hidden = true;
+    $(".result-actions", result).hidden = false;
+  }
+  scene.addEventListener("click", e => { if (state.rolling && !e.target.closest("button")) state.skip = true; });
+
+  async function playRoll(roll, blank, prev) {
+    state.current = roll;
+    if (roll.energy) setEnergy(roll.energy);
+    if (roll.wallet) state.wallet = roll.wallet;
+    // настоящий номер: если формат тот же, символы встают на место в той же заготовке
+    let item = blank;
+    if (!blank || roll.plate.style !== "ru" || prev.style !== "ru") {
+      if (blank) blank.remove();
+      item = mountPlate(roll.plate, "· · ·", "#8E97A8", "rig-hold");
+    } else {
+      blank.className = "rig-item rig-hold";
+      blank.innerHTML = tilt(roll.plate, "· · ·", "#8E97A8");
+    }
+    await reveal(item, roll);
+
+    // удар: рамка получает цвет редкости, сцена вздрагивает, летят искры
+    const ev = roll.eval, power = Math.min(1, ev.score / 80);
+    scene.classList.remove("is-fast");
+    item.className = "rig-item rig-slam";
+    $(".pf", item).style.setProperty("--tier", ev.tier_color);
+    $(".pf-lip span", item).textContent = roll.auto_sold ? t("Продано") : tierName(ev);
+    setTier(ev.tier_color);
+    scene.classList.remove("is-shake"); void scene.offsetWidth; scene.classList.add("is-shake");
+    burst(ev.tier_color, power);
+    if (ev.score >= 45) { haptic.heavy(); setTimeout(haptic.heavy, 140); } else if (ev.score >= 12) haptic.ok(); else if (!state.auto) haptic.hit();
+
+    $("#scene-caption").textContent = place(roll.plate);
+    renderResult(roll.plate, ev, result, false);
+    syncActions(); renderExtras();
+    if (roll.auto_sold) toast(`+${fmtMoney(roll.auto_sold, "RUB")} · ${t("автопродажа")}`);
+  }
+
   async function spin(recheck) {
-    if (state.rolling) return;
-    if (state.energy.current <= 0) { haptic.warn(); openEnergy(true); return; }
+    if (state.rolling) return false;
+    if (state.energy.current <= 0) { haptic.warn(); setAuto(false); openEnergy(true); return false; }
     state.rolling = true;
-    btnSpin.classList.add("is-rolling"); setSpinLabel("Крутим…");
+    btnSpin.classList.add("is-rolling"); if (!state.auto) setSpinLabel("Крутим…");
     result.hidden = true; $("#spin-hint").hidden = true; $("#scene-caption").textContent = "";
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (!state.auto) window.scrollTo({ top: 0, behavior: "smooth" });
     haptic.hit();
 
     // старый номер падает вниз, пустая заготовка влетает сверху и крутит символы
@@ -280,53 +371,64 @@
     dropOld();
     scene.classList.add("is-fast");
     const blank = mountPlate(prev.style === "ru" ? prev : demoPlate(), "· · ·", "#8E97A8", "rig-drop");
-    let stop = startRolling(blank);
+    const stop = startRolling(blank);
     const t0 = performance.now();
     let roll, err;
     try { roll = (await api("spin", recheck === true ? { recheck: true } : {})).roll; } catch (e) { err = e; }
-    await sleep(Math.max(0, 900 - (performance.now() - t0)));
+    await sleep(Math.max(0, (state.auto ? 450 : 750) - (performance.now() - t0)));
     stop();
 
     if (err) {
       scene.classList.remove("is-fast"); state.rolling = false; btnSpin.classList.remove("is-rolling");
+      setAuto(false);
       showCurrent(false); if (!state.current) setSpinLabel("Крутить");
       if (err.code === "no_energy") { if (err.data.energy) setEnergy(err.data.energy); openEnergy(true); }
       else if (err.code === "subscribe") openSponsors(err.data.sponsors || []);
       else toast(err.message);
       haptic.warn();
-      return;
+      return false;
     }
+    await playRoll(roll, blank, prev);
+    state.rolling = false; btnSpin.classList.remove("is-rolling");
+    setSpinLabel(state.auto ? "Стоп" : "Крутить ещё");
+    return true;
+  }
 
-    state.current = roll;
-    if (roll.energy) setEnergy(roll.energy);
-    // настоящий номер: если формат тот же, символы встают на место в той же заготовке
-    let item = blank;
-    if (roll.plate.style !== "ru" || (prev.style !== "ru")) {
-      blank.remove();
-      item = mountPlate(roll.plate, "· · ·", "#8E97A8", "rig-hold");
-    } else {
-      blank.className = "rig-item rig-hold";
-      blank.innerHTML = tilt(roll.plate, "· · ·", "#8E97A8");
+  /* Автопрокрутка: крутит сама, пока есть энергия. Покупается в «Улучшениях». */
+  function setAuto(on) {
+    state.auto = !!on;
+    $("#scene-auto").classList.toggle("is-on", state.auto);
+    btnSpin.classList.toggle("is-auto", state.auto);
+    setSpinLabel(state.auto ? "Стоп" : state.rolling ? "Крутим…" : state.current ? "Крутить ещё" : "Крутить");
+  }
+  async function autoLoop() {
+    while (state.auto && state.tab === "spin") {
+      if (!(await spin())) break;
+      await sleep(state.current && state.current.eval.score >= 28 ? 1600 : 420);   // на редком даём рассмотреть
     }
-    stop = startRolling(item);
-    await sleep(160);
-    stop();
-    await settle(item);
+    setAuto(false);
+  }
+  $("#scene-auto").addEventListener("click", () => {
+    haptic.tap();
+    if (!(state.upgrades && state.upgrades.auto.owned)) { toast(t("Автопрокрутка покупается в «Улучшениях»")); openTab("upgrades"); return; }
+    if (state.auto) { setAuto(false); return; }
+    setAuto(true); if (!state.rolling) autoLoop();
+  });
 
-    // удар: рамка получает цвет редкости, сцена вздрагивает, летят искры
-    const ev = roll.eval, power = Math.min(1, ev.score / 80);
-    scene.classList.remove("is-fast");
-    item.className = "rig-item rig-slam";
-    $(".pf", item).style.setProperty("--tier", ev.tier_color);
-    $(".pf-lip span", item).textContent = tierName(ev);
-    setTier(ev.tier_color);
-    scene.classList.remove("is-shake"); void scene.offsetWidth; scene.classList.add("is-shake");
-    burst(ev.tier_color, power);
-    if (ev.score >= 45) { haptic.heavy(); setTimeout(haptic.heavy, 140); } else if (ev.score >= 12) haptic.ok(); else haptic.hit();
-
-    $("#scene-caption").textContent = place(roll.plate);
-    renderResult(roll.plate, ev);
-    syncActions(); renderExtras();
+  /* Номер из кейса: та же сцена, но без энергии */
+  async function showCaseRoll(roll) {
+    openTab("spin");
+    await sleep(120);
+    state.rolling = true; btnSpin.classList.add("is-rolling");
+    result.hidden = true; $("#spin-hint").hidden = true; $("#scene-caption").textContent = "";
+    const prev = state.current ? state.current.plate : demoPlate();
+    if (state.current) { history.unshift(state.current); history.length = Math.min(history.length, 10); }
+    dropOld();
+    scene.classList.add("is-fast");
+    const blank = mountPlate(prev.style === "ru" ? prev : demoPlate(), "· · ·", "#8E97A8", "rig-drop");
+    const stop = startRolling(blank);
+    await sleep(800); stop();
+    await playRoll(roll, blank, prev);
     state.rolling = false; btnSpin.classList.remove("is-rolling"); setSpinLabel("Крутить ещё");
   }
 
@@ -381,9 +483,9 @@
     openSheet(`<h2>${t(empty ? "Энергия кончилась" : "Энергия")}</h2>
       <p>${t("Один бросок тратит одну энергию. Она восстанавливается сама, а можно пополнить сразу")}${en.current < en.max ? ` · +1 ${fmtTimer(en.next_in)}` : ""}</p>
       <div class="packs">${state.packs.map((p, i) => `<button class="pack" type="button" data-pack="${esc(p.id)}">
-        <span class="pack-art">${'<img src="static/img/3d/bolt.png" alt="">'.repeat(i + 1)}</span>
+        <span class="pack-art">${'<img src="static/img/3d/bolt.png?w=1" alt="">'.repeat(i + 1)}</span>
         <span class="pack-name"><b>+${p.amount}</b><small>${p.amount} ${t("бросков")}</small></span>
-        <span class="pack-price"><img src="static/img/3d/star.png" alt="">${p.stars}</span></button>`).join("")}</div>`);
+        <span class="pack-price"><img src="static/img/3d/star.png?w=1" alt="">${p.stars}</span></button>`).join("")}</div>`);
     $$(".pack", $("#sheet")).forEach(b => b.addEventListener("click", () => buyEnergy(b.dataset.pack)));
   }
   async function buyEnergy(pack) {
@@ -404,7 +506,7 @@
   function openSponsors(list) {
     openSheet(`<h2>${t("Подпишись на спонсоров")}</h2><p>${t("Чтобы крутить номера, подпишись на каналы ниже и нажми «Проверить подписку»")}</p>
       <div class="packs">${list.map(s => `<button class="pack" type="button" data-link="${esc(s.link)}">
-        <span class="pack-art"><img src="static/img/3d/key.png" alt=""></span>
+        <span class="pack-art"><img src="static/img/3d/key.png?w=1" alt=""></span>
         <span class="pack-name"><b>${esc(s.title)}</b><small>${t("Подписаться")}</small></span></button>`).join("")}</div>
       <button class="btn btn-primary btn-wide" id="sp-check" type="button">${t("Проверить подписку")}</button>`);
     $$(".pack[data-link]", $("#sheet")).forEach(b => b.addEventListener("click", () => {
@@ -452,39 +554,98 @@
 
   /* ------------------------------------------------------------ Гараж и топ */
   function fmtTtl(expires) { const s = Math.max(0, Math.round(expires - Date.now() / 1000)); return s > 3600 ? Math.floor(s / 3600) + " " + t("ч") : Math.max(1, Math.floor(s / 60)) + " " + t("мин"); }
-  function renderCars() {
-    const w = state.wallet || { money: 0, owned: [] }, car = state.cars.find(c => c.id === w.car);
-    const best = state.garage[0] || state.current;
-    const room = $("#showroom");
-    room.classList.toggle("is-empty", !car);
-    const wallet = `<span class="wallet"><img src="static/img/3d/money.png" alt="">${fmtMoney(w.money, "RUB")}</span>`;
-    room.innerHTML = car
-      ? `<img class="showroom-photo" src="static/img/cars/${car.id}.jpg" alt=""><div class="showroom-top"><span class="showroom-name">${esc(car.name)}</span>${wallet}</div>${best ? `<div class="showroom-plate">${framed(best.plate, tierName(best.eval), best.eval.tier_color)}</div>` : ""}`
-      : `<div class="showroom-top"><span></span>${wallet}</div><img src="static/img/3d/car.png" alt="" width="84" height="84"><b>${t("Машины пока нет")}</b><p>${t("Продай пару номеров и купи первую в автосалоне ниже")}</p>`;
-    $("#car-shop").innerHTML = state.cars.map(c => {
-      const owned = w.owned.includes(c.id), cur = w.car === c.id, can = w.money >= c.price;
-      const act = cur ? `<span class="is-current">${t("За рулём")}</span>`
-        : owned ? `<button type="button" data-use="${c.id}">${t("Сесть")}</button>`
-        : `<button type="button" class="${can ? "is-buy" : ""}" data-buy="${c.id}" ${can ? "" : "disabled"}>${t("Купить")}</button>`;
-      const sub = owned ? fmtMoney(c.price, "RUB") : can ? fmtMoney(c.price, "RUB") : `${fmtMoney(c.price, "RUB")} · ${t("Не хватает").toLowerCase()} ${fmtMoney(c.price - w.money, "RUB")}`;
-      return `<div class="car ${owned ? "" : "is-locked"}"><img src="static/img/cars/${c.id}.jpg" alt="" loading="lazy"><div class="car-info"><b>${esc(c.name)}</b><small>${sub}</small></div>${act}</div>`;
-    }).join("");
+  // гараж из трёх частей вместо одной длинной ленты
+  const GPARTS = ["plates", "shop", "top"];
+  function openGaragePart(part) {
+    state.gpart = part;
+    $("#garage-seg").style.setProperty("--seg", GPARTS.indexOf(part));
+    $$("#garage-seg button").forEach(b => b.classList.toggle("is-on", b.dataset.part === part));
+    $$(".gpart").forEach(p => { p.hidden = p.dataset.part !== part; });
+    if (part === "shop") renderCars(true);
+    if (part === "top") loadTop();
   }
+  $("#garage-seg").addEventListener("click", e => { const b = e.target.closest("[data-part]"); if (b && b.dataset.part !== state.gpart) { haptic.tap(); openGaragePart(b.dataset.part); } });
+
+  // автосалон: витрина, одна машина на экран
+  function renderCars(jump) {
+    const w = state.wallet || { money: 0, owned: [] }, best = state.garage[0] || state.current;
+    $("#garage-wallet").innerHTML = `<img src="static/img/3d/money.png?w=1" alt="">${fmtMoney(w.money, "RUB")}`;
+    const shop = $("#car-shop"), keep = shop.scrollLeft;
+    shop.innerHTML = state.cars.map((c, i) => {
+      const owned = w.owned.includes(c.id), cur = w.car === c.id, can = w.money >= c.price;
+      const tag = cur ? t("За рулём") : owned ? t("В гараже") : `${i + 1} / ${state.cars.length}`;
+      const act = cur ? `<button type="button" class="btn btn-soft btn-wide" disabled>${t("Ты за рулём")}</button>`
+        : owned ? `<button type="button" class="btn btn-primary btn-wide" data-use="${c.id}">${t("Сесть за руль")}</button>`
+        : `<button type="button" class="btn ${can ? "btn-primary" : "btn-soft"} btn-wide" data-buy="${c.id}" ${can ? "" : "disabled"}>${can ? `${t("Купить за")} ${fmtMoney(c.price, "RUB")}` : `${t("Не хватает")} ${fmtMoney(c.price - w.money, "RUB")}`}</button>`;
+      const pct = owned ? 100 : Math.min(100, Math.floor(100 * w.money / c.price));
+      return `<div class="deal ${owned ? "is-owned" : ""} ${cur ? "is-cur" : ""}">
+        <div class="deal-photo"><img src="static/img/cars/${c.id}.jpg" alt="" loading="${i < 2 ? "eager" : "lazy"}"><span class="deal-tag">${tag}</span>
+          ${cur && best ? `<div class="deal-plate">${framed(best.plate, tierName(best.eval), best.eval.tier_color)}</div>` : ""}</div>
+        <div class="deal-body"><b class="deal-name">${esc(c.name)}</b><span class="deal-price">${fmtMoney(c.price, "RUB")}</span>
+          ${owned ? `<small class="deal-note">${t("Машина появится на карточках твоих номеров")}</small>` : `<div class="goal-bar"><i style="width:${pct}%"></i></div><small class="deal-note">${t("Накоплено")} ${pct}%</small>`}
+          ${act}</div></div>`;
+    }).join("");
+    $("#car-dots").innerHTML = state.cars.map(() => "<i></i>").join("");
+    if (jump) {
+      // открываем на своей машине, иначе на первой, которую ещё не купил
+      let i = state.cars.findIndex(c => c.id === w.car);
+      if (i < 0) i = Math.max(0, state.cars.findIndex(c => !w.owned.includes(c.id)));
+      requestAnimationFrame(() => { shop.scrollLeft = shop.children[i] ? shop.children[i].offsetLeft - shop.offsetLeft - 14 : 0; dealDots(); });
+    } else { shop.scrollLeft = keep; dealDots(); }
+  }
+  function dealDots() {
+    const shop = $("#car-shop"), w = shop.children[0] ? shop.children[0].offsetWidth + 10 : 1, i = Math.round(shop.scrollLeft / w);
+    $$("#car-dots i").forEach((d, k) => d.classList.toggle("is-on", k === i));
+  }
+  $("#car-shop").addEventListener("scroll", dealDots, { passive: true });
   async function carAction(body) {
     haptic.tap();
-    try { state.wallet = (await api("car", body)).wallet; haptic.ok(); renderCars(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    try { state.wallet = (await api("car", body)).wallet; haptic.ok(); toast(t(body.buy ? "Машина куплена" : "Ты за рулём")); renderCars(false); }
     catch (e) { toast(e.message); haptic.warn(); }
   }
 
+  // номер в гараже: по нажатию — шторка с действиями
+  function openPlate(roll) {
+    haptic.tap();
+    openSheet(`<div class="ps-plate">${framed(roll.plate, tierName(roll.eval), roll.eval.tier_color)}</div>
+      <div class="ps-head" style="--tier:${roll.eval.tier_color}"><span class="tier"><i></i><span>${esc(tierName(roll.eval))}</span></span><span class="rank">${roll.eval.score} ${t("очков")}</span></div>
+      <h2 class="ps-price">${priceText(roll.plate, roll.eval)}</h2>
+      <p>${roll.forever ? t("Сохранён навсегда") : `${t("сгорит через")} ${fmtTtl(roll.expires)}`}</p>
+      <div class="ps-acts">
+        ${roll.money ? `<button type="button" class="btn btn-primary btn-wide" data-sellm="${roll.id}"><img src="static/img/3d/money.png?w=1" alt="" width="22" height="22">${t("Продать за")} ${fmtMoney(roll.money, "RUB")}</button>` : ""}
+        ${roll.sell ? `<button type="button" class="btn btn-soft btn-wide" data-sell="${roll.id}"><img src="static/img/3d/bolt.png?w=1" alt="" width="22" height="22">${t("Продать за")} ${roll.sell} ${t("энергии")}</button>` : ""}
+        <button type="button" class="btn btn-soft btn-wide is-danger" data-del="${roll.id}">${t("Удалить")}</button>
+      </div>`);
+  }
+  $("#sheet").addEventListener("click", e => {
+    const sb = e.target.closest("[data-sell],[data-sellm]"), db = e.target.closest("[data-del]");
+    if (sb) {
+      const money = "sellm" in sb.dataset, roll = state.garage.find(r => r.id === +(money ? sb.dataset.sellm : sb.dataset.sell));
+      closeSheet();
+      sellRoll(roll, () => { if (state.current && state.current.id === roll.id) { state.current.sold = true; syncActions(); } renderGarage(); }, money);
+    } else if (db) {
+      if (db.dataset.confirm) { closeSheet(); deleteRoll(state.garage.find(r => r.id === +db.dataset.del)); return; }
+      haptic.tap(); db.dataset.confirm = "1"; db.textContent = t("Точно удалить?");
+    }
+  });
+
+  const SORTS = { price: (a, b) => (b.money || 0) - (a.money || 0) || b.id - a.id, new: (a, b) => b.id - a.id, tier: (a, b) => b.eval.score - a.eval.score || b.id - a.id };
+  $("#garage-sort").addEventListener("click", e => {
+    const b = e.target.closest("[data-sort]"); if (!b) return;
+    haptic.tap(); state.sort = b.dataset.sort;
+    $$("#garage-sort button").forEach(x => x.classList.toggle("is-on", x === b));
+    renderGarage();
+  });
   function renderGarage() {
     renderCars();
-    const g = state.garage;
-    $("#garage-empty").hidden = true;
-    $("#garage-stats").innerHTML = `<div><b>${state.stats.spins || 0}</b><span>${t("прокруток")}</span></div><div><b>${state.stats.best_score || 0}</b><span>${t("рекорд очков")}</span></div><div><b>${g.length}/${state.stats.slots || 0}</b><span>${t("мест в гараже")}</span></div>`;
-    $("#garage-list").innerHTML = g.map((r, i) => `<div class="garage-card" style="--tier:${r.eval.tier_color};animation-delay:${i * 50}ms"><div class="garage-item">${mini(r.plate, "mid")}
-      <div class="garage-info"><b>${priceText(r.plate, r.eval)}</b><span>${esc(tierName(r.eval))} · ${r.eval.score}</span><small>${r.forever ? t("навсегда") : `${t("сгорит через")} ${fmtTtl(r.expires)}`}</small></div></div>
-      <div class="garage-acts">${r.sell ? `<button type="button" data-sell="${r.id}">${r.sell} ⚡</button>` : ""}${r.money ? `<button type="button" data-sellm="${r.id}"><img src="static/img/3d/money.png" alt="">${fmtMoney(r.money, "RUB")}</button>` : ""}<button type="button" class="is-danger" data-del="${r.id}">${t("Удалить")}</button></div></div>`).join("")
-      + Array.from({ length: Math.max(0, Math.min(5, (state.stats.slots || 0) - g.length)) }, () => `<div class="garage-item is-free"><span class="pw mid"><span class="slot-free"></span></span><div class="garage-info"><small>${t("Свободное место")}</small></div></div>`).join("");
+    const g = state.garage.slice().sort(SORTS[state.sort || "price"]);
+    $("#garage-sort").hidden = g.length < 2;
+    const total = g.reduce((a, r) => a + (r.money || 0), 0), free = Math.max(0, (state.stats.slots || 0) - g.length);
+    $("#garage-stats").innerHTML = `<div><b>${g.length}/${state.stats.slots || 0}</b><span>${t("мест занято")}</span></div><div><b>${fmtMoney(total, "RUB")}</b><span>${t("стоит гараж")}</span></div>`;
+    $("#garage-list").innerHTML = g.length ? g.map((r, i) => `<button type="button" class="grow" data-open="${r.id}" style="--tier:${r.eval.tier_color};animation-delay:${Math.min(i, 8) * 40}ms">${mini(r.plate, "")}
+      <span class="grow-info"><b>${priceText(r.plate, r.eval)}</b><small>${esc(tierName(r.eval))}</small></span></button>`).join("")
+      : `<div class="empty"><img src="static/img/3d/car.png?w=1" alt="" width="72" height="72"><p>${t("Пока пусто. Крути номера и сохраняй лучшие")}</p></div>`;
+    $("#garage-note").textContent = `${free ? `${t("Свободно мест")}: ${free}. ` : ""}${t("Несохранённые номера сгорают через 24 часа")}`;
   }
   async function loadTop() {
     try {
@@ -492,7 +653,7 @@
       const initial = n => esc((n || "?").trim().charAt(0).toUpperCase());
       const pod = top.slice(0, 3), rest = top.slice(3);
       $("#top-list").innerHTML = top.length
-        ? `<div class="podium">${[1, 0, 2].filter(i => pod[i]).map(i => `<div class="pod pod-${i + 1}"><span class="pod-ava">${initial(pod[i].name)}<img src="static/img/3d/medal${i + 1}.png" alt=""></span><b>${esc(pod[i].name)}</b><small>${esc(pod[i].plate_text)}</small><span class="pod-step"><b>${pod[i].score}</b><i>${t("очков")}</i></span></div>`).join("")}</div>`
+        ? `<div class="podium">${[1, 0, 2].filter(i => pod[i]).map(i => `<div class="pod pod-${i + 1}"><span class="pod-ava">${initial(pod[i].name)}<img src="static/img/3d/medal${i + 1}.png?w=1" alt=""></span><b>${esc(pod[i].name)}</b><small>${esc(pod[i].plate_text)}</small><span class="pod-step"><b>${pod[i].score}</b><i>${t("очков")}</i></span></div>`).join("")}</div>`
           + (rest.length ? `<div class="board">${rest.map((p, i) => `<div class="board-row"><span class="board-place">${i + 4}</span><span class="board-ava">${initial(p.name)}</span><span class="board-name"><b>${esc(p.name)}</b><small>${esc(p.plate_text)}</small></span><span class="board-score">${p.score}</span></div>`).join("")}</div>` : "")
         : `<div class="board"><div class="board-row"><span class="board-name"><b>${t("Пока никого. Стань первым")}</b></span></div></div>`;
     } catch (e) { /* топ необязателен */ }
@@ -508,7 +669,7 @@
     const on = c => mode === "world" || (mode === "ru" ? c === "RU" : countries.includes(c));
     grid.innerHTML = state.countries.map(c => `<button type="button" class="globe ${on(c.code) ? "is-on" : ""}" data-code="${c.code}">${ball(c.code)}<span>${esc(countryName(c.code))}</span></button>`).join("");
     const label = mode === "ru" ? t("Россия") : mode === "world" ? t("Весь мир") : `${countries.length} ${t("стран")}`;
-    $("#scene-mode").innerHTML = (mode === "ru" ? ball("RU", "sm") : `<img src="static/img/3d/globe.png" alt="">`) + `<span>${esc(label)}</span>`;
+    $("#scene-mode").innerHTML = (mode === "ru" ? ball("RU", "sm") : `<img src="static/img/3d/globe.png?w=1" alt="">`) + `<span>${esc(label)}</span>`;
     $("#row-lang-val").textContent = (I.LANGS.find(l => l[0] === I.lang) || [])[1] || "";
   }
   async function saveSettings(patch) {
@@ -548,20 +709,185 @@
   $("#row-lang").addEventListener("click", () => { haptic.tap(); openLang(); });
   $("#row-tour").addEventListener("click", () => { haptic.tap(); runTour(false); });
 
+  /* ------------------------------------------------------------ Меню */
+  const money = n => fmtMoney(n, "RUB");
+  const moneyImg = '<img src="static/img/3d/money.png?w=1" alt="">';
+  const boltImg = '<img src="static/img/3d/bolt.png?w=1" alt="">';
+  const purseHTML = () => `<span class="wallet">${moneyImg}${money((state.wallet || {}).money || 0)}</span><span class="wallet">${boltImg}${state.energy.current}</span>`;
+  function setBadge(n) { state.badge = n || 0; $("#menu-dot").hidden = !state.badge; }
+  function plateFromText(text) {             // «В123ОР 50» → номер для отрисовки
+    const [main, region] = text.split(" ");
+    return ruPlate(main[0], main.slice(1, 4), main[4], main[5], region);
+  }
+  const TILES = [
+    ["tasks", "Задания", "trophy"], ["cases", "Кейсы", "key"], ["upgrades", "Улучшения", "fire"], ["collection", "Коллекция", "gem"],
+    ["ach", "Достижения", "medal1"], ["stats", "Статистика", "glowstar"], ["world", "Страны", "globe"], ["energy", "Энергия", "bolt"],
+  ];
+  async function renderMenu() {
+    $("#purse").innerHTML = purseHTML();
+    const sub = {}, draw = () => {
+      $("#tiles").innerHTML = TILES.map(([id, title, img], i) => `<button class="tile" type="button" data-open="${id}" style="--i:${i}">
+        <img src="static/img/3d/${img}.png?w=1" alt=""><b>${t(title)}</b><small>${sub[id] || "&nbsp;"}</small>${sub[id + "_dot"] ? '<i class="dot"></i>' : ""}</button>`).join("");
+    };
+    sub.world = esc($("#scene-mode span") ? $("#scene-mode span").textContent : "");
+    sub.energy = `${state.energy.current} / ${state.energy.max}`;
+    sub.cases = `${t("от")} ${money(80000)}`;
+    sub.upgrades = state.upgrades && state.upgrades.auto.owned ? t("Автопрокрутка есть") : t("Автопрокрутка, гараж");
+    draw();
+    try {
+      const s = await api("menu/summary");
+      setBadge(s.badge);
+      sub.tasks = s.tasks_claim ? `${s.tasks_claim} ${t("награды ждут")}` : `${s.tasks_done} ${t("из")} ${s.tasks_total}`;
+      sub.tasks_dot = s.tasks_claim; sub.ach_dot = s.ach_claim;
+      sub.ach = s.ach_claim ? `${s.ach_claim} ${t("награды ждут")}` : `${s.ach_done} ${t("из")} ${s.ach_total}`;
+      sub.collection = `${s.found} ${t("из")} ${s.total}`;
+      sub.stats = `${group(s.spins)} ${t("прокруток")}`;
+      draw();
+    } catch (e) { /* подписи необязательны */ }
+  }
+  $("#tiles").addEventListener("click", e => {
+    const b = e.target.closest("[data-open]"); if (!b) return;
+    if (b.dataset.open === "energy") { haptic.tap(); openEnergy(false); return; }
+    openTab(b.dataset.open);
+  });
+  $$(".page .back").forEach(b => b.addEventListener("click", () => openTab("menu")));
+
+  // задания и достижения: одна строка — цель, прогресс, награда
+  const rewardHTML = (kind, amount) => kind === "energy" ? `${boltImg}+${amount}` : `${moneyImg}+${money(amount)}`;
+  function goalRow(it, kind) {
+    const pct = Math.round(100 * Math.min(1, it.progress / it.goal));
+    const prog = it.metric === "best" ? (it.done ? t("Готово") : t("Пока нет")) : `${group(it.progress)} / ${group(it.goal)}`;
+    const act = it.claimed ? `<span class="goal-got">${t("Получено")}</span>`
+      : it.done ? `<button type="button" class="is-buy" data-claim="${it.id}" data-kind="${kind}">${t("Забрать")}</button>`
+      : `<span class="goal-reward">${kind === "task" ? rewardHTML(it.reward[0], it.reward[1]) : rewardHTML("money", it.reward)}</span>`;
+    return `<div class="goal ${it.done ? "is-done" : ""} ${it.claimed ? "is-claimed" : ""}">
+      <div class="goal-main"><b>${esc(t(it.title))}</b>${it.text ? `<small>${esc(t(it.text))}</small>` : ""}
+        <div class="goal-bar"><i style="width:${pct}%"></i></div><small class="goal-prog">${prog}</small></div>${act}</div>`;
+  }
+  async function renderTasks() {
+    try {
+      const d = await api("menu/tasks");
+      setBadge(d.badge);
+      const h = Math.floor(d.resets_in / 3600), m = Math.floor(d.resets_in % 3600 / 60);
+      $("#tasks-reset").textContent = `${t("Новые задания через")} ${h} ${t("ч")} ${m} ${t("мин")}`;
+      $("#tasks-list").innerHTML = d.items.map(it => goalRow(it, "task")).join("");
+      $("#ach-list").innerHTML = d.achievements.map(it => goalRow(it, "ach")).join("");
+    } catch (e) { toast(e.message); }
+  }
+  async function claim(b) {
+    haptic.tap(); b.disabled = true;
+    try {
+      const r = await api("claim", { kind: b.dataset.kind, id: b.dataset.claim });
+      state.wallet = r.wallet; setEnergy(r.energy, r.reward.kind === "energy"); setBadge(r.badge);
+      haptic.ok(); toast(r.reward.kind === "energy" ? `+${r.reward.amount} ${t("энергии")}` : `+${money(r.reward.amount)}`);
+      renderTasks();
+    } catch (e) { toast(e.message); haptic.warn(); b.disabled = false; }
+  }
+  ["#tasks-list", "#ach-list"].forEach(s => $(s).addEventListener("click", e => { const b = e.target.closest("[data-claim]"); if (b) claim(b); }));
+
+  // кейсы: номер с гарантией редкости, открывается на главной сцене
+  const MYSTERY = ruPlate("?", "???", "?", "?", "??");
+  async function renderCases() {
+    $("#cases-purse").innerHTML = purseHTML();
+    try {
+      const d = await api("menu/shop");
+      state.wallet = d.wallet; state.upgrades = d.upgrades; setBadge(d.badge);
+      $("#cases-purse").innerHTML = purseHTML();
+      $("#cases-list").innerHTML = d.cases.map(c => {
+        const tier = LADDER.find(l => l[2] <= c.min && (LADDER[LADDER.indexOf(l) + 1] || [0, 0, 999])[2] > c.min) || LADDER[1];
+        const can = d.wallet.money >= c.price;
+        return `<div class="case" style="--tier:${tier[1]}"><div class="case-art">${framed(MYSTERY, `${I.tier(tier[0])} +`, tier[1])}</div>
+          <div class="case-foot"><div class="case-info"><b>${esc(t(c.title))}</b><small>${esc(t(c.text))}</small></div>
+          <button type="button" class="${can ? "is-buy" : ""}" data-case="${c.id}" ${can ? "" : "disabled"}>${money(c.price)}</button></div></div>`;
+      }).join("");
+    } catch (e) { toast(e.message); }
+  }
+  $("#cases-list").addEventListener("click", async e => {
+    const b = e.target.closest("[data-case]"); if (!b || state.rolling) return;
+    haptic.hit(); b.disabled = true;
+    try {
+      const r = await api("case/open", { id: b.dataset.case });
+      state.wallet = r.wallet; setBadge(r.badge);
+      showCaseRoll(r.roll);
+    } catch (err) { toast(err.message); haptic.warn(); b.disabled = false; }
+  });
+
+  // улучшения
+  const AUTOSELL = [["", "Выключена"], ["uncommon", "Обычные"], ["rare", "До редких"], ["epic", "До эпических"]];
+  async function renderUpgrades() {
+    $("#up-purse").innerHTML = purseHTML();
+    try {
+      const d = await api("menu/shop");
+      state.wallet = d.wallet; state.upgrades = d.upgrades; setBadge(d.badge);
+      drawUpgrades();
+    } catch (e) { toast(e.message); }
+  }
+  function drawUpgrades() {
+    const u = state.upgrades, w = state.wallet, buy = (id, price) => `<button type="button" class="${w.money >= price ? "is-buy" : ""}" data-up="${id}" ${w.money >= price ? "" : "disabled"}>${money(price)}</button>`;
+    const owned = `<span class="goal-got">${t("Куплено")}</span>`;
+    $("#up-purse").innerHTML = purseHTML();
+    $("#up-list").innerHTML = `
+      <div class="goal"><img class="goal-art" src="static/img/3d/racecar.png?w=1" alt=""><div class="goal-main"><b>${t("Автопрокрутка")}</b><small>${t("Кнопка «Авто» на сцене: номера крутятся сами, пока есть энергия")}</small></div>${u.auto.owned ? owned : buy("auto", u.auto.price)}</div>
+      <div class="goal"><img class="goal-art" src="static/img/3d/money.png?w=1" alt=""><div class="goal-main"><b>${t("Автопродажа")}</b><small>${t("Дешёвые номера сразу продаются за деньги, пока ты крутишь")}</small></div>${u.autosell.owned ? owned : buy("autosell", u.autosell.price)}</div>
+      ${u.autosell.owned ? `<div class="chips chips-wide" id="autosell-seg">${AUTOSELL.map(([k, l]) => `<button type="button" data-below="${k}" class="${u.autosell.below === k ? "is-on" : ""}">${t(l)}</button>`).join("")}</div>` : ""}
+      <div class="goal"><img class="goal-art" src="static/img/3d/car.png?w=1" alt=""><div class="goal-main"><b>${t("Гараж")} +${u.slots.step} ${t("мест")}</b><small>${t("Сейчас мест")}: ${u.slots.total} · ${t("уровень")} ${u.slots.level} / ${u.slots.max}</small>
+        <div class="goal-bar"><i style="width:${Math.round(100 * u.slots.level / u.slots.max)}%"></i></div></div>${u.slots.level >= u.slots.max ? `<span class="goal-got">${t("Максимум")}</span>` : buy("slots", u.slots.price)}</div>`;
+  }
+  $("#up-list").addEventListener("click", async e => {
+    const b = e.target.closest("[data-up],[data-below]"); if (!b) return;
+    haptic.tap(); b.disabled = true;
+    try {
+      const r = await api("upgrade", "up" in b.dataset ? { buy: b.dataset.up } : { autosell: b.dataset.below });
+      state.upgrades = r.upgrades; state.wallet = r.wallet; state.stats = { ...state.stats, ...r.stats };
+      haptic.ok(); if ("up" in b.dataset) toast(t("Куплено"));
+      drawUpgrades();
+    } catch (err) { toast(err.message); haptic.warn(); b.disabled = false; }
+  });
+
+  // коллекция: каталог редкостей, найденное подсвечено
+  async function renderCollection() {
+    try {
+      const d = await api("menu/collection");
+      const groups = [];
+      d.items.forEach(it => { let g = groups.find(x => x[0] === it.group); if (!g) groups.push(g = [it.group, []]); g[1].push(it); });
+      $("#coll-body").innerHTML = `<div class="figures"><div><b>${d.found} / ${d.total}</b><span>${t("собрано")}</span></div><div><b>${Math.round(100 * d.found / d.total)}%</b><span>${t("коллекции")}</span></div></div>
+        <div class="goal-bar goal-bar-big"><i style="width:${Math.round(100 * d.found / d.total)}%"></i></div>`
+        + groups.map(([name, items]) => `<div class="head head-sub"><h2>${esc(t(name))}</h2><p>${items.filter(i => i.count).length} ${t("из")} ${items.length}</p></div>
+          <div class="coll">${items.map(it => `<div class="coll-row ${it.count ? "" : "is-locked"}">${mini(plateFromText(it.example))}<div class="coll-info"><b>${esc(it.title)}</b><small>+${it.points} ${t("очков")}${it.count ? ` · ${t("выпадал")} ${it.count}` : ""}</small></div></div>`).join("")}</div>`).join("");
+    } catch (e) { toast(e.message); }
+  }
+
+  // статистика
+  async function renderStats() {
+    try {
+      const d = await api("menu/stats"), total = d.tiers.reduce((a, x) => a + x.count, 0) || 1;
+      const best = LADDER.slice().reverse().find(l => d.best >= l[2]) || LADDER[0];
+      $("#stats-body").innerHTML = `<div class="figures"><div><b>${group(d.spins)}</b><span>${t("прокруток")}</span></div><div><b>${d.days}</b><span>${t("дней в игре")}</span></div></div>
+        <div class="figures"><div><b>${money(d.money)}</b><span>${t("на счёте")}</span></div><div><b>${money(d.earned)}</b><span>${t("заработано")}</span></div></div>
+        <div class="figures"><div><b>${group(d.sold)}</b><span>${t("продано")}</span></div><div><b>${d.cars}</b><span>${t("машин")}</span></div><div><b>${d.finds}/${d.catalog_total}</b><span>${t("редкостей")}</span></div></div>
+        <div class="head head-sub"><h2>${t("Что выпадало")}</h2><p>${t("Лучший номер")}: <b style="color:${best[1]}">${esc(I.tier(best[0]))}</b>, ${d.best} ${t("очков")}</p></div>
+        <div class="bars">${d.tiers.map(x => `<div class="bars-row" style="--tier:${x.color}"><span>${esc(I.tier(x.tier, x.name))}</span><div class="bars-track"><i style="width:${x.count ? Math.max(2, Math.round(100 * x.count / total)) : 0}%"></i></div><b>${group(x.count)}</b></div>`).join("")}</div>`;
+    } catch (e) { toast(e.message); }
+  }
+
   /* ------------------------------------------------------------ Вкладки */
-  const TABS = ["spin", "feed", "garage", "world"];
+  const TABS = ["spin", "feed", "garage", "menu"];
+  const PAGES = { tasks: renderTasks, ach: renderTasks, cases: renderCases, upgrades: renderUpgrades, collection: renderCollection, stats: renderStats, world: renderWorld };
   $("#tabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) openTab(b.dataset.tab); });
   function openTab(name) {
     if (name === state.tab) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     haptic.tap();
+    if (state.auto && name !== "spin") setAuto(false);
+    const tab = name in PAGES ? "menu" : name, was = name in PAGES || state.tab in PAGES ? "menu" : state.tab;
     state.tab = name;
-    $("#tabs").style.setProperty("--tab", TABS.indexOf(name));
-    $$("#tabs button").forEach(b => { const on = b.dataset.tab === name; b.classList.toggle("is-on", on); if (on) playIcon($(".ico", b)); });
+    $("#tabs").style.setProperty("--tab", TABS.indexOf(tab));
+    $$("#tabs button").forEach(b => { const on = b.dataset.tab === tab; b.classList.toggle("is-on", on); if (on && was !== tab) playIcon($(".ico", b)); });
     $$(".screen").forEach(s => s.classList.toggle("is-active", s.dataset.screen === name));
     $(".dock").classList.toggle("no-spin", name !== "spin");
     if (name === "feed") startFeed(); else stopFeed();
-    if (name === "garage") { renderGarage(); loadTop(); }
-    if (name === "world") renderWorld();
+    if (name === "garage") { renderGarage(); openGaragePart(state.gpart || "plates"); }
+    if (name === "menu") renderMenu();
+    if (PAGES[name]) PAGES[name]();
     window.scrollTo(0, 0);
   }
 
@@ -573,7 +899,7 @@
   function applyLang() {
     $$("[data-i18n]").forEach(el => { if (!el.dataset.ru) el.dataset.ru = el.textContent.trim(); el.textContent = t(el.dataset.ru); });
     renderWorld();
-    if (state.tab === "garage") { renderGarage(); loadTop(); }
+    if (state.tab === "garage") { renderGarage(); if (state.gpart === "top") loadTop(); }
     if (!state.rolling) showCurrent(false);
     if (!state.current) setSpinLabel("Крутить");
     renderExtras();
@@ -592,8 +918,8 @@
     { h: "Собери гараж", p: "Сохраняй лучшие номера, кидай их в чаты и поднимайся в топе игроков", build: stage => {
       const fan = [[ruPlate("В", "001", "О", "Р", "78"), -9, 34], [ruPlate("К", "100", "К", "К", "77"), 5, 50], [ruPlate("М", "777", "М", "М", "99"), -3, 66]];
       stage.innerHTML = `<div class="slide">${fan.map(([p, rot, top], i) => tourPlate(p, "НОМЕРА", "", top, "translate(-50%,260%) rotateX(-50deg)", `translate(calc(-50% + var(--px) * ${10 + i * 8}px),-50%) rotateZ(${rot}deg) rotateY(calc(var(--px) * 10deg)) scale(.84)`, i)).join("")}
-        <img class="slide-art" src="static/img/3d/trophy.png" alt="" style="right:6%;top:9%;--from:translateY(-140px) rotate(30deg);--to:translate(calc(var(--px) * -22px),calc(var(--py) * -14px)) rotate(10deg);--i:1">
-        <img class="slide-art" src="static/img/3d/bolt.png" alt="" style="left:7%;bottom:8%;--from:translateY(140px) rotate(-30deg);--to:translate(calc(var(--px) * 26px),calc(var(--py) * 16px)) rotate(-12deg);--i:2"></div>`;
+        <img class="slide-art" src="static/img/3d/trophy.png?w=1" alt="" style="right:6%;top:9%;--from:translateY(-140px) rotate(30deg);--to:translate(calc(var(--px) * -22px),calc(var(--py) * -14px)) rotate(10deg);--i:1">
+        <img class="slide-art" src="static/img/3d/bolt.png?w=1" alt="" style="left:7%;bottom:8%;--from:translateY(140px) rotate(-30deg);--to:translate(calc(var(--px) * 26px),calc(var(--py) * 16px)) rotate(-12deg);--i:2"></div>`;
     } },
   ];
   const tourPlate = (p, lip, color, top, from, to, i) => `<div class="pf fly" style="top:${top}%;--from:${from};--to:${to};--i:${i};${color ? `--tier:${color}` : ""}">${plateHTML(p)}<div class="pf-lip"><span>${esc(lip)}</span></div><div class="pf-glare"></div></div>`;
@@ -629,6 +955,7 @@
   async function refresh() {
     const b = await api("bootstrap");
     Object.assign(state, { user: b.user, ai: !!b.ai, countries: b.countries, settings: b.settings, garage: b.garage, stats: b.stats, packs: b.energy_packs || [], wallet: b.wallet || { money: 0, car: null, owned: [] }, cars: b.cars || [] });
+    state.upgrades = b.upgrades || null; setBadge(b.badge);
     setEnergy(b.energy);
     if (b.last && !state.current) state.current = b.last;
     renderWorld();
@@ -637,7 +964,7 @@
     if (state.tab === "garage") renderGarage();
   }
 
-  btnSpin.addEventListener("click", spin);
+  btnSpin.addEventListener("click", () => { if (state.auto) { haptic.tap(); setAuto(false); } else spin(); });
   $("#btn-save").addEventListener("click", saveCurrent);
   $("#btn-share").addEventListener("click", shareCurrent);
   $("#btn-ai").addEventListener("click", aiCurrent);
@@ -648,15 +975,8 @@
   });
   $("#btn-sell").addEventListener("click", () => sellRoll(state.current, () => { syncActions(); $(".pf-lip span", rig) && ($(".pf-lip span", rig).textContent = t("Продано")); }));
   $("#garage-list").addEventListener("click", e => {
-    const sb = e.target.closest("[data-sell],[data-sellm]"), db = e.target.closest("[data-del]");
-    if (sb) {
-      const money = "sellm" in sb.dataset, roll = state.garage.find(r => r.id === +(money ? sb.dataset.sellm : sb.dataset.sell));
-      sellRoll(roll, () => { if (state.current && state.current.id === roll.id) { state.current.sold = true; syncActions(); } renderGarage(); }, money);
-    } else if (db) {
-      if (db.dataset.confirm) { deleteRoll(state.garage.find(r => r.id === +db.dataset.del)); return; }
-      haptic.tap(); db.dataset.confirm = "1"; db.textContent = t("Точно удалить?");
-      setTimeout(() => { if (db.isConnected) { delete db.dataset.confirm; db.textContent = t("Удалить"); } }, 3000);
-    }
+    const b = e.target.closest("[data-open]"), roll = b && state.garage.find(r => r.id === +b.dataset.open);
+    if (roll) openPlate(roll);
   });
   $("#energy").addEventListener("click", () => { haptic.tap(); openEnergy(false); });
 

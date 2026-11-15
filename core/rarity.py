@@ -121,7 +121,10 @@ class Evaluation:
     price_rub: int
     price_usd: int
     percentile: float                # «топ X%» — доля номеров с не меньшим счётом
-    reasons: list[dict] = field(default_factory=list)   # [{"title":..., "points":...}]
+    reasons: list[dict] = field(default_factory=list)   # [{"title":..., "points":..., "at": шаг открытия}]
+    steps: list = field(default_factory=list)    # [[цена ₽, ключ редкости], ...] после каждого открытого символа
+    keys: list = field(default_factory=list)     # что из каталога редкостей есть в номере
+    fact: str = ""                               # справка о серии или регионе
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -187,63 +190,61 @@ def _digit_patterns(digits: str, reasons: list, strong: bool = True) -> int:
     return pts
 
 
+# Порядок открытия символов российского номера: буква, три цифры, две буквы, регион.
+# Шаг k означает «открыто k+1 символов».
+RU_AT_DIGITS, RU_AT_L2, RU_AT_L3 = 3, 4, 5
+
+
 def _evaluate_ru(plate: Plate) -> tuple[int, list[dict]]:
     p = plate.parts
     letters = p["l1"] + p["l2"] + p["l3"]
     digits = p["digits"]
     region = p["region"]
+    last = 5 + len(region)
     reasons: list[dict] = []
     score = 0
 
-    # Буквы
+    def add(title: str, pts: int, at: int, key: str) -> None:
+        nonlocal score
+        score += pts
+        reasons.append({"title": title, "points": pts, "at": at, "key": key})
+
+    # Буквы (видны, когда открыта последняя буква серии)
     if letters in RU_SERIES:
         pts, title = RU_SERIES[letters]
-        score += pts
-        reasons.append({"title": title, "points": pts})
+        add(title, pts, RU_AT_L3, "s:" + letters)
     elif p["l2"] == p["l3"]:
-        score += 10
-        reasons.append({"title": f"Парные буквы {p['l2']}{p['l3']}", "points": 10})
+        add(f"Парные буквы {p['l2']}{p['l3']}", 10, RU_AT_L3, "g:letters2")
     elif p["l1"] == p["l2"] or p["l1"] == p["l3"]:
-        score += 4
-        reasons.append({"title": "Повтор буквы", "points": 4})
+        add("Повтор буквы", 4, RU_AT_L2 if p["l1"] == p["l2"] else RU_AT_L3, "g:letter")
 
-    # Цифры
+    # Цифры (видны после третьей цифры)
     if digits in RU_DIGITS:
         pts, title = RU_DIGITS[digits]
-        score += pts
-        reasons.append({"title": title, "points": pts})
+        add(title, pts, RU_AT_DIGITS, "d:" + digits)
     elif int(digits) % 100 == 0:
-        score += 15
-        reasons.append({"title": f"Круглые цифры {digits}", "points": 15})
+        add(f"Круглые цифры {digits}", 15, RU_AT_DIGITS, "g:round")
     elif int(digits) < 10:
-        score += 16
-        reasons.append({"title": "Номер до десяти", "points": 16})
+        add("Номер до десяти", 16, RU_AT_DIGITS, "g:under10")
     elif digits == digits[::-1]:
-        score += 8
-        reasons.append({"title": "Зеркальные цифры", "points": 8})
+        add("Зеркальные цифры", 8, RU_AT_DIGITS, "g:mirror")
     elif digits[0] == digits[1] or digits[1] == digits[2]:
-        score += 5
-        reasons.append({"title": "Пара одинаковых цифр", "points": 5})
+        add("Пара одинаковых цифр", 5, RU_AT_DIGITS, "g:pair")
 
     # Регион
     if region in RU_REGION_BONUS:
         pts, title = RU_REGION_BONUS[region]
-        score += pts
-        reasons.append({"title": title, "points": pts})
+        add(title, pts, last, "r:" + title)
 
     # Комбинации
     if digits == region:
-        score += 20
-        reasons.append({"title": "Цифры совпадают с регионом", "points": 20})
+        add("Цифры совпадают с регионом", 20, last, "c:region")
     if digits == "777" and region == "777":
-        score += 30
-        reasons.append({"title": "Джекпот: 777 в регионе 777", "points": 30})
+        add("Джекпот: 777 в регионе 777", 30, last, "c:jackpot")
     if len(set(letters)) == 1 and len(set(digits)) == 1:
-        score += 20
-        reasons.append({"title": "Полный комплект: буквы и цифры", "points": 20})
+        add("Полный комплект: буквы и цифры", 20, last, "c:full")
     elif letters in RU_SERIES and RU_SERIES[letters][0] >= 20 and digits in RU_DIGITS:
-        score += 10
-        reasons.append({"title": "Блатная серия с красивыми цифрами", "points": 10})
+        add("Блатная серия с красивыми цифрами", 10, last, "c:blat")
 
     return score, reasons
 
@@ -325,6 +326,25 @@ def _evaluate_generic(plate: Plate) -> tuple[int, list[dict]]:
     return score, reasons
 
 
+def reveal_len(plate: Plate) -> int:
+    """Сколько символов открывается по одному. Мини-апа открывает их в том же порядке и том же количестве."""
+    if plate.country == "RU":
+        return 6 + len(plate.parts["region"])
+    return sum(1 for ch in plate.text if ch != " ")
+
+
+def _steps(plate: Plate, reasons: list[dict], price_rub: int, tier: str) -> list:
+    """Цена и редкость после каждого открытого символа. Растут только тогда, когда закономерность уже видна."""
+    n = reveal_len(plate)
+    out = []
+    for k in range(n):
+        sc = sum(r["points"] for r in reasons if r.get("at", n - 1) <= k)
+        out.append([_price_rub(sc, plate.text), _tier(sc)[0]])
+    if out:
+        out[-1] = [price_rub, tier]          # последний шаг всегда равен итогу
+    return out
+
+
 def evaluate(plate: Plate) -> Evaluation:
     if plate.country == "RU":
         score, reasons = _evaluate_ru(plate)
@@ -334,13 +354,82 @@ def evaluate(plate: Plate) -> Evaluation:
     key, name, color = _tier(score)
     price_rub = _price_rub(score, plate.text)
     price_usd = _nice(price_rub / USD_RATE) if price_rub else 0
+    keys = [r.pop("key") for r in reasons if "key" in r]
     if not reasons:
         reasons.append({"title": "Без особых признаков", "points": 0})
     return Evaluation(
         score=score, tier=key, tier_name=name, tier_color=color,
         price_rub=price_rub, price_usd=price_usd,
         percentile=percentile(plate.country, score), reasons=reasons,
+        steps=_steps(plate, reasons, price_rub, key), keys=keys, fact=fact_of(plate),
     )
+
+
+# ---------------------------------------------------------------- Справки и каталог
+
+#: Справка под номером. Только то, что широко известно, без выдумок.
+SERIES_FACTS: dict[str, str] = {
+    "АМР": "Серию связывают с машинами федеральных ведомств. На вторичном рынке одна из самых дорогих",
+    "ЕКХ": "В народе «еду как хочу». Считалась серией спецслужб, сейчас во многом у частников",
+    "ААА": "Три одинаковые буквы видно издалека. Одна из самых узнаваемых серий",
+    "ООО": "Три «О» на дороге читаются как три нуля. За такие серии на рынке просят миллионы",
+    "ХХХ": "Три «Х» встречаются на дороге редко, и их любят за дерзость",
+    "АМО": "Серию связывают с машинами московской мэрии",
+    "ХКХ": "Перевёртыш: серия читается одинаково с обеих сторон",
+    "ЕРЕ": "Перевёртыш: серия читается одинаково с обеих сторон",
+    "ВОР": "Номер-шутка. Такие покупают ради надписи, а не ради статуса",
+}
+DIGIT_FACTS: dict[str, str] = {
+    "777": "Три семёрки — самые желанные цифры на российских номерах",
+    "001": "Первый номер серии: в каждой серии региона такой только один",
+    "007": "«Агентский» номер, его ищут поклонники Бонда",
+}
+REGION_FACTS: dict[str, str] = {
+    "777": "Регион 777 — московский, один из самых узнаваемых в стране",
+    "77": "Регион 77 — первый московский код, самый статусный из московских",
+    "97": "Ранние московские коды ценятся выше поздних трёхзначных",
+    "99": "Ранние московские коды ценятся выше поздних трёхзначных",
+    "78": "Регион 78 — Санкт-Петербург",
+    "95": "Регион 95 — Чечня. Красивые номера там в большом почёте",
+}
+
+
+def fact_of(plate: Plate) -> str:
+    if plate.country != "RU":
+        return ""
+    p = plate.parts
+    return (SERIES_FACTS.get(p["l1"] + p["l2"] + p["l3"]) or DIGIT_FACTS.get(p["digits"])
+            or REGION_FACTS.get(p["region"]) or "")
+
+
+CATALOG_GROUPS = {"c": "Комбинации", "s": "Серии букв", "d": "Цифры", "r": "Регионы", "g": "Закономерности"}
+
+
+def catalog() -> list[dict]:
+    """Каталог редкостей российского номера. Ключи совпадают с Evaluation.keys."""
+    items = [{"key": "c:jackpot", "title": "Джекпот: 777 в регионе 777", "points": 30, "example": "А777АА 777"},
+             {"key": "c:full", "title": "Полный комплект: буквы и цифры", "points": 20, "example": "М555ММ 50"},
+             {"key": "c:region", "title": "Цифры совпадают с регионом", "points": 20, "example": "К199РУ 199"},
+             {"key": "c:blat", "title": "Блатная серия с красивыми цифрами", "points": 10, "example": "А777МР 97"}]
+    for letters, (pts, title) in sorted(RU_SERIES.items(), key=lambda kv: -kv[1][0]):
+        items.append({"key": "s:" + letters, "title": f"Слово {letters}" if title.startswith("Буквы") else title,
+                      "points": pts, "example": f"{letters[0]}123{letters[1:]} 50"})
+    for digits, (pts, title) in sorted(RU_DIGITS.items(), key=lambda kv: -kv[1][0]):
+        items.append({"key": "d:" + digits, "title": title, "points": pts, "example": f"В{digits}ОР 50"})
+    seen = set()
+    for code, (pts, title) in sorted(RU_REGION_BONUS.items(), key=lambda kv: -kv[1][0]):
+        if title not in seen:
+            seen.add(title)
+            items.append({"key": "r:" + title, "title": title, "points": pts, "example": f"В123ОР {code}"})
+    items += [{"key": "g:under10", "title": "Номер до десяти", "points": 16, "example": "В005ОР 50"},
+              {"key": "g:round", "title": "Круглые цифры", "points": 15, "example": "В200ОР 50"},
+              {"key": "g:letters2", "title": "Парные буквы", "points": 10, "example": "Р123ТТ 50"},
+              {"key": "g:mirror", "title": "Зеркальные цифры", "points": 8, "example": "В353ОР 50"},
+              {"key": "g:pair", "title": "Пара одинаковых цифр", "points": 5, "example": "В332ОР 50"},
+              {"key": "g:letter", "title": "Повтор буквы", "points": 4, "example": "В123ВР 50"}]
+    for it in items:
+        it["group"] = CATALOG_GROUPS[it["key"][0]]
+    return items
 
 
 # ---------------------------------------------------------------- Распределение
